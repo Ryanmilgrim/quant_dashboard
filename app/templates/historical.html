@@ -1,0 +1,30 @@
+{% extends 'base.html' %}
+
+{% block content %}
+  <h2>Historical Prices</h2>
+  <form method="post" class="row gy-2 gx-3 align-items-end mb-3">
+    <div class="col-md-3">
+      <label class="form-label" for="ticker">Ticker</label>
+      <input class="form-control" id="ticker" name="ticker" placeholder="AAPL" required>
+    </div>
+    <div class="col-md-3">
+      <label class="form-label" for="start_date">Start Date</label>
+      <input class="form-control" id="start_date" name="start_date" type="date">
+    </div>
+    <div class="col-md-3">
+      <label class="form-label" for="end_date">End Date</label>
+      <input class="form-control" id="end_date" name="end_date" type="date">
+    </div>
+    <div class="col-md-3">
+      <button class="btn btn-primary" type="submit">Fetch Data</button>
+    </div>
+  </form>
+
+  {% if data_table %}
+    <div class="table-responsive">
+      {{ data_table | safe }}
+    </div>
+  {% else %}
+    <p class="text-muted">Submit a ticker to see recent price history.</p>
+  {% endif %}
+{% endblock %}
