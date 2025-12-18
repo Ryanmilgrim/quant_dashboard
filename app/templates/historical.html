@@ -1,6 +1,18 @@
 {% extends 'base.html' %}
 
 {% block content %}
+  <style>
+    .chart-container {
+      height: 640px;
+      min-height: 60vh;
+    }
+
+    @media (max-width: 576px) {
+      .chart-container {
+        height: 70vh;
+      }
+    }
+  </style>
   <h2>Investment Universe &ndash; Benchmark Composition</h2>
   <p class="lead">Select the assets that form your investment universe. This will serve as the basis for your benchmark portfolio and downstream performance comparisons.</p>
   <p class="text-muted">The tool relies on Fama-French daily industry portfolios for long, academically vetted history. Log returns keep compounding consistent and avoid downstream math surprises. Choose the industry granularity and weighting that best mirrors your investment approach, then view how that benchmark would have evolved over time.</p>
@@ -43,10 +55,10 @@
 
   {% if chart_data %}
     <div class="card shadow-sm mb-3">
-      <div class="card-body">
+      <div class="card-body p-4 p-lg-5">
         <h5 class="card-title">Benchmark growth from investment universe (Index = 100)</h5>
         <p class="card-subtitle text-muted small mb-3">Historical performance of the selected universe; this shapes the benchmark you will compare future portfolios against. Long histories are resampled monthly for a faster, smoother view.</p>
-        <div id="industryChart" style="height: 480px;"></div>
+        <div id="industryChart" class="chart-container"></div>
       </div>
     </div>
     <script src="https://cdn.plot.ly/plotly-2.35.0.min.js" crossorigin="anonymous"></script>
