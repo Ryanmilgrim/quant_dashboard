@@ -1,8 +1,10 @@
+"""Flask presentation layer for the quant dashboard."""
+
 from flask import Flask
 
 
 def create_app() -> Flask:
-    app = Flask(__name__)
+    app = Flask(__name__, template_folder="templates")
 
     from .blueprints.core.routes import core_bp
     from .blueprints.options.routes import options_bp
@@ -13,3 +15,6 @@ def create_app() -> Flask:
     app.register_blueprint(options_bp)
 
     return app
+
+
+__all__ = ["create_app"]
