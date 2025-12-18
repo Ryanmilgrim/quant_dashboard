@@ -61,6 +61,7 @@
         x: series.x,
         y: series.y,
         line: { color: palette[idx % palette.length], width: 2, shape: 'spline', smoothing: 0.2 },
+        hoverinfo: 'x+y+name',
         hovertemplate: '%{x}<br>%{y:.2f}' + '<extra>' + series.name + '</extra>',
       }));
 
@@ -78,7 +79,7 @@
           automargin: true,
         },
         legend: { orientation: 'h', y: -0.2 },
-        hovermode: 'x unified',
+        hovermode: 'closest',
         template: 'plotly_white',
       };
 
