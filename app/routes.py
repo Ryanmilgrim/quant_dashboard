@@ -1,9 +1,9 @@
 from datetime import date
 from typing import Optional
 
-from flask import Blueprint, flash, redirect, render_template, request, url_for
+from flask import Blueprint, flash, render_template, request
 
-from .services.market_data import fetch_price_history
+from .services.market_data import SUPPORTED_INDUSTRY_UNIVERSES, fetch_ff_industry_daily
 from .services.options import black_scholes_price
 
 main_bp = Blueprint("main", __name__)
@@ -17,29 +17,48 @@ def index():
 @main_bp.route("/historical", methods=["GET", "POST"])
 def historical_prices():
     data_html: Optional[str] = None
+    selected_universe = request.form.get("universe", "49")
+    weighting = request.form.get("weighting", "value")
+    return_form = request.form.get("return_form", "log")
+
     if request.method == "POST":
-        ticker = request.form.get("ticker", "").strip().upper()
         start = request.form.get("start_date")
         end = request.form.get("end_date")
 
-        if not ticker:
-            flash("Please provide a ticker symbol.", "warning")
-            return redirect(url_for("main.historical_prices"))
-
         try:
+            universe = int(selected_universe)
+            if universe not in SUPPORTED_INDUSTRY_UNIVERSES:
+                raise ValueError("Unsupported universe")
+
             start_date = date.fromisoformat(start) if start else None
             end_date = date.fromisoformat(end) if end else None
-            df = fetch_price_history(ticker, start_date=start_date, end_date=end_date)
-            if df is None or df.empty:
+
+            df = fetch_ff_industry_daily(
+                universe,
+                weighting=weighting,  # type: ignore[arg-type]
+                start_date=start_date,
+                end_date=end_date,
+                return_form=return_form,  # type: ignore[arg-type]
+            )
+
+            if df.empty:
                 flash("No data returned for the requested range.", "warning")
             else:
-                data_html = df.tail(50).to_html(classes="table table-striped table-sm", border=0)
+                display = df.tail(50) * 100
+                data_html = display.round(3).to_html(classes="table table-striped table-sm", border=0)
         except ValueError:
-            flash("Invalid date format. Please use YYYY-MM-DD.", "danger")
+            flash("Please provide valid inputs.", "danger")
         except Exception:
-            flash("Unable to retrieve market data right now.", "danger")
+            flash("Unable to retrieve Fama-French industry data right now.", "danger")
 
-    return render_template("historical.html", data_table=data_html)
+    return render_template(
+        "historical.html",
+        data_table=data_html,
+        universes=SUPPORTED_INDUSTRY_UNIVERSES,
+        selected_universe=selected_universe,
+        weighting=weighting,
+        return_form=return_form,
+    )
 
 
 @main_bp.route("/black-scholes", methods=["GET", "POST"])

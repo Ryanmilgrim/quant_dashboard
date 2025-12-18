@@ -1,22 +1,47 @@
 {% extends 'base.html' %}
 
 {% block content %}
-  <h2>Historical Prices</h2>
+  <h2>Fama-French Industry Portfolios</h2>
   <form method="post" class="row gy-2 gx-3 align-items-end mb-3">
     <div class="col-md-3">
-      <label class="form-label" for="ticker">Ticker</label>
-      <input class="form-control" id="ticker" name="ticker" placeholder="AAPL" required>
+      <label class="form-label" for="universe">Industry Universe</label>
+      <select class="form-select" id="universe" name="universe">
+        {% for u in universes %}
+          <option value="{{ u }}" {% if u|string == selected_universe %}selected{% endif %}>{{ u }} Industries</option>
+        {% endfor %}
+      </select>
     </div>
     <div class="col-md-3">
+      <label class="form-label">Weighting</label>
+      <div class="d-flex gap-3">
+        <div class="form-check">
+          <input class="form-check-input" type="radio" id="weight_value" name="weighting" value="value" {% if weighting == 'value' %}checked{% endif %}>
+          <label class="form-check-label" for="weight_value">Value</label>
+        </div>
+        <div class="form-check">
+          <input class="form-check-input" type="radio" id="weight_equal" name="weighting" value="equal" {% if weighting == 'equal' %}checked{% endif %}>
+          <label class="form-check-label" for="weight_equal">Equal</label>
+        </div>
+      </div>
+    </div>
+    <div class="col-md-2">
+      <label class="form-label" for="return_form">Return Form</label>
+      <select class="form-select" id="return_form" name="return_form">
+        <option value="log" {% if return_form == 'log' %}selected{% endif %}>Log</option>
+        <option value="simple" {% if return_form == 'simple' %}selected{% endif %}>Simple</option>
+      </select>
+    </div>
+    <div class="col-md-2">
       <label class="form-label" for="start_date">Start Date</label>
       <input class="form-control" id="start_date" name="start_date" type="date">
     </div>
-    <div class="col-md-3">
+    <div class="col-md-2">
       <label class="form-label" for="end_date">End Date</label>
       <input class="form-control" id="end_date" name="end_date" type="date">
     </div>
-    <div class="col-md-3">
-      <button class="btn btn-primary" type="submit">Fetch Data</button>
+    <div class="col-12">
+      <button class="btn btn-primary" type="submit">Fetch Returns</button>
+      <p class="text-muted small mb-0">Results show the most recent 50 daily observations, expressed as percentages.</p>
     </div>
   </form>
 
@@ -25,6 +50,6 @@
       {{ data_table | safe }}
     </div>
   {% else %}
-    <p class="text-muted">Submit a ticker to see recent price history.</p>
+    <p class="text-muted">Choose a universe to inspect the industry return series.</p>
   {% endif %}
 {% endblock %}
