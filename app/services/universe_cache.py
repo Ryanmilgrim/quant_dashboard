@@ -40,6 +40,14 @@ def get_universe_returns(
     if end_date:
         df = df.loc[df.index < pd.Timestamp(end_date)]
 
+    if not df.empty:
+        # Treat the benchmark as an equally weighted blend of the underlying
+        # industries. We insert it up front so downstream charts can display it
+        # alongside each constituent series.
+        benchmark = df.mean(axis=1)
+        df = df.copy()
+        df.insert(0, "Benchmark", benchmark)
+
     return df
 
 

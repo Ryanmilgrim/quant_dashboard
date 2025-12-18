@@ -15,7 +15,7 @@
   </style>
   <h2>Investment Universe &ndash; Benchmark Composition</h2>
   <p class="lead">Select the assets that form your investment universe. This will serve as the basis for your benchmark portfolio and downstream performance comparisons.</p>
-  <p class="text-muted">The tool relies on Fama-French daily industry portfolios for long, academically vetted history. Log returns keep compounding consistent and avoid downstream math surprises. Choose the industry granularity and weighting that best mirrors your investment approach, then view how that benchmark would have evolved over time.</p>
+  <p class="text-muted">The tool relies on Fama-French daily industry portfolios for long, academically vetted history. Log returns keep compounding consistent and avoid downstream math surprises. Choose the industry granularity, then view how that benchmark would have evolved over time. Benchmarks are value-weighted; you can optionally view the log of price growth to better spot long-run compounding.</p>
 
   <form method="post" class="row gy-3 gx-3 align-items-end mb-4">
     <div class="col-md-4">
@@ -27,17 +27,11 @@
       </select>
     </div>
     <div class="col-md-4">
-      <label class="form-label">Weighting Scheme</label>
-      <div class="d-flex gap-3">
-        <div class="form-check">
-          <input class="form-check-input" type="radio" id="weight_value" name="weighting" value="value" {% if weighting == 'value' %}checked{% endif %}>
-          <label class="form-check-label" for="weight_value">Value-weighted benchmark</label>
-        </div>
-        <div class="form-check">
-          <input class="form-check-input" type="radio" id="weight_equal" name="weighting" value="equal" {% if weighting == 'equal' %}checked{% endif %}>
-          <label class="form-check-label" for="weight_equal">Equal-weighted benchmark</label>
-        </div>
-      </div>
+      <label class="form-label" for="transform">Growth display</label>
+      <select class="form-select" id="transform" name="transform">
+        <option value="index" {% if transform == 'index' %}selected{% endif %}>Indexed price growth (base = 100)</option>
+        <option value="log" {% if transform == 'log' %}selected{% endif %}>Log price growth</option>
+      </select>
     </div>
     <div class="col-12">
       <label class="form-label" for="start_date">Start Date for benchmark window</label>
@@ -56,8 +50,8 @@
   {% if chart_data %}
     <div class="card shadow-sm mb-3">
       <div class="card-body p-4 p-lg-5">
-        <h5 class="card-title">Benchmark growth from investment universe (Index = 100)</h5>
-        <p class="card-subtitle text-muted small mb-3">Historical performance of the selected universe; this shapes the benchmark you will compare future portfolios against. Long histories are resampled monthly for a faster, smoother view.</p>
+        <h5 class="card-title">Benchmark growth from investment universe</h5>
+        <p class="card-subtitle text-muted small mb-3">Historical performance of the selected universe; this shapes the benchmark you will compare future portfolios against. Long histories are resampled monthly for a faster, smoother view. Use the dropdown to switch between indexed price levels and log price growth.</p>
         <div id="industryChart" class="chart-container"></div>
       </div>
     </div>
@@ -66,15 +60,17 @@
       const chartData = {{ chart_data | tojson }};
       const palette = ['#2563eb', '#16a34a', '#ea580c', '#9333ea', '#0f172a', '#e11d48', '#0284c7', '#a855f7'];
 
+      const hoverFmt = chartData.y_axis_title && chartData.y_axis_title.toLowerCase().includes('log') ? '.4f' : '.2f';
+
       const traces = chartData.series.map((series, idx) => ({
         type: 'scatter',
         mode: 'lines',
         name: series.name,
         x: series.x,
         y: series.y,
-        line: { color: palette[idx % palette.length], width: 2, shape: 'spline', smoothing: 0.2 },
+        line: { color: palette[idx % palette.length], width: series.name === 'Benchmark' ? 3 : 2, shape: 'spline', smoothing: 0.2 },
         hoverinfo: 'x+y+name',
-        hovertemplate: '%{x}<br>%{y:.2f}' + '<extra>' + series.name + '</extra>',
+        hovertemplate: '%{x}<br>%{y' + hoverFmt + '}' + '<extra>' + series.name + '</extra>',
       }));
 
       const layout = {
@@ -86,8 +82,8 @@
           automargin: true,
         },
         yaxis: {
-          title: 'Benchmark index level',
-          tickformat: ',.0f',
+          title: chartData.y_axis_title || 'Benchmark index level',
+          tickformat: chartData.y_axis_title && chartData.y_axis_title.toLowerCase().includes('log') ? '.2f' : ',.0f',
           automargin: true,
         },
         legend: { orientation: 'h', y: -0.2 },
