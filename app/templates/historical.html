@@ -1,9 +1,12 @@
 {% extends 'base.html' %}
 
 {% block content %}
-  <h2>Fama-French Industry Portfolios</h2>
-  <form method="post" class="row gy-2 gx-3 align-items-end mb-3">
-    <div class="col-md-3">
+  <h2>Industry &amp; Factor Universe</h2>
+  <p class="lead">Explore the Fama-French industry and factor data universe with configurable portfolio groupings.</p>
+  <p class="text-muted">We lean on the Fama-French daily industry portfolios because they provide deep, academically vetted history across multiple industry splits. Log returns are enforced throughout the tool to keep compounding consistent and avoid downstream math issues, and you can choose which industry portfolio universe best fits your analysis.</p>
+
+  <form method="post" class="row gy-3 gx-3 align-items-end mb-4">
+    <div class="col-md-4">
       <label class="form-label" for="universe">Industry Universe</label>
       <select class="form-select" id="universe" name="universe">
         {% for u in universes %}
@@ -11,7 +14,7 @@
         {% endfor %}
       </select>
     </div>
-    <div class="col-md-3">
+    <div class="col-md-4">
       <label class="form-label">Weighting</label>
       <div class="d-flex gap-3">
         <div class="form-check">
@@ -24,32 +27,68 @@
         </div>
       </div>
     </div>
-    <div class="col-md-2">
-      <label class="form-label" for="return_form">Return Form</label>
-      <select class="form-select" id="return_form" name="return_form">
-        <option value="log" {% if return_form == 'log' %}selected{% endif %}>Log</option>
-        <option value="simple" {% if return_form == 'simple' %}selected{% endif %}>Simple</option>
-      </select>
-    </div>
-    <div class="col-md-2">
+    <div class="col-12">
       <label class="form-label" for="start_date">Start Date</label>
-      <input class="form-control" id="start_date" name="start_date" type="date">
-    </div>
-    <div class="col-md-2">
-      <label class="form-label" for="end_date">End Date</label>
-      <input class="form-control" id="end_date" name="end_date" type="date">
+      <input class="form-control" id="start_date" name="start_date" type="date" value="{{ start_date_value }}">
     </div>
     <div class="col-12">
-      <button class="btn btn-primary" type="submit">Fetch Returns</button>
-      <p class="text-muted small mb-0">Results show the most recent 50 daily observations, expressed as percentages.</p>
+      <label class="form-label" for="end_date">End Date</label>
+      <input class="form-control" id="end_date" name="end_date" type="date" value="{{ end_date_value }}">
+    </div>
+    <div class="col-12 d-flex flex-column flex-sm-row gap-2 align-items-start align-items-sm-center">
+      <button class="btn btn-primary" type="submit">Update Universe View</button>
+      <p class="text-muted small mb-0">Defaults show the past 50 years ending today for the 5-industry portfolios using log returns.</p>
     </div>
   </form>
 
-  {% if data_table %}
-    <div class="table-responsive">
-      {{ data_table | safe }}
+  {% if chart_data %}
+    <div class="card shadow-sm mb-3">
+      <div class="card-body">
+        <h5 class="card-title">Historical Price Growth (Index = 100)</h5>
+        <canvas id="industryChart" height="120"></canvas>
+      </div>
     </div>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script>
+      const chartData = {{ chart_data | tojson }};
+      const palette = ['#2563eb', '#16a34a', '#ea580c', '#9333ea', '#0f172a', '#e11d48', '#0284c7', '#a855f7'];
+      const datasets = chartData.series.map((series, idx) => ({
+        label: series.label,
+        data: series.data,
+        borderColor: palette[idx % palette.length],
+        backgroundColor: palette[idx % palette.length],
+        borderWidth: 2,
+        pointRadius: 0,
+        tension: 0.2,
+      }));
+
+      new Chart(document.getElementById('industryChart'), {
+        type: 'line',
+        data: {
+          labels: chartData.dates,
+          datasets,
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          scales: {
+            x: {
+              title: { display: true, text: 'Date' },
+              ticks: { maxTicksLimit: 10 },
+            },
+            y: {
+              title: { display: true, text: 'Index Level' },
+              ticks: { callback: (value) => value.toLocaleString() },
+            },
+          },
+          plugins: {
+            tooltip: { mode: 'index', intersect: false },
+            legend: { position: 'bottom' },
+          },
+        },
+      });
+    </script>
   {% else %}
-    <p class="text-muted">Choose a universe to inspect the industry return series.</p>
+    <p class="text-muted">No chart data available for the selected configuration.</p>
   {% endif %}
 {% endblock %}
