@@ -1,4 +1,4 @@
-from datetime import date
+from datetime import date, datetime
 from typing import Optional
 
 import numpy as np
@@ -68,8 +68,17 @@ def investment_universe():
             raise ValueError("Unsupported frequency option")
 
         earliest_start = get_universe_start_date(universe, weighting)
-        start_date_value = start_date_value or earliest_start.isoformat()
-        start_date = date.fromisoformat(start_date_value)
+        start_date_value = start_date_value or earliest_start.strftime("%m/%d/%y")
+
+        try:
+            start_date = datetime.strptime(start_date_value, "%m/%d/%y").date()
+        except ValueError as parse_err:
+            # Allow legacy ISO inputs if a user edits the field manually
+            try:
+                start_date = date.fromisoformat(start_date_value)
+            except ValueError:
+                raise ValueError("Invalid start date format") from parse_err
+        start_date_value = start_date.strftime("%m/%d/%y")
 
         df = get_universe_returns(universe, weighting=weighting, start_date=start_date)
 
