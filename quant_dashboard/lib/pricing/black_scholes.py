@@ -1,6 +1,5 @@
 from math import erf, exp, log, sqrt
 
-
 def _norm_cdf(x: float) -> float:
     """Cumulative distribution function for a standard normal variable."""
 

@@ -1,0 +1,9 @@
+- Library code lives in `quant_dashboard/lib`.
+- Flask web layer lives in `quant_dashboard/web`.
+- Commands to run:
+  - `pip install -r requirements.txt`
+  - (optional) `pip install -r requirements-dev.txt`
+  - `pytest`
+  - `flask --app wsgi run --debug`
+- Do not import Flask into `quant_dashboard/lib`.
+- Prefer small diffs; keep behavior stable.

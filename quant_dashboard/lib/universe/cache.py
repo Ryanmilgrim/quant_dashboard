@@ -6,7 +6,7 @@ from typing import Optional
 
 import pandas as pd
 
-from .market_data import Weighting, fetch_ff_industry_daily
+from quant_dashboard.lib.data.french_industry import Weighting, fetch_ff_industry_daily
 
 
 @lru_cache(maxsize=32)

@@ -5,8 +5,8 @@ import numpy as np
 import pandas as pd
 from flask import Blueprint, flash, render_template, request
 
-from ...services.market_data import SUPPORTED_INDUSTRY_UNIVERSES
-from ...services.universe_cache import get_universe_returns, get_universe_start_date
+from quant_dashboard.lib.data import SUPPORTED_INDUSTRY_UNIVERSES
+from quant_dashboard.lib.universe import get_universe_returns, get_universe_start_date
 
 universe_bp = Blueprint("universe", __name__, url_prefix="/universe")
 
