@@ -4,12 +4,13 @@
   <div class="p-4 mb-4 bg-light rounded-3">
     <div class="container-fluid py-2">
       <h1 class="display-6 fw-bold">Quant Finance Playground</h1>
-      <p class="col-md-8 fs-5">
-        A lightweight hub to showcase quant projects. Start with live market data
-        views and option pricing, then expand with your next ideas.
+      <p class="col-md-10 fs-5">
+        A modular hub for current and future quant projects. Each section is its
+        own blueprint, so adding portfolio analytics, signal research, or risk
+        tools stays organized as the dashboard grows.
       </p>
-      <a class="btn btn-primary me-2" href="{{ url_for('main.historical_prices') }}">Historical Prices</a>
-      <a class="btn btn-outline-secondary" href="{{ url_for('main.black_scholes_view') }}">Black-Scholes Pricing</a>
+      <a class="btn btn-primary me-2" href="{{ url_for('universe.investment_universe') }}">Investment Universe</a>
+      <a class="btn btn-outline-secondary" href="{{ url_for('options.black_scholes_view') }}">Black-Scholes Pricing</a>
     </div>
   </div>
   <div class="row">

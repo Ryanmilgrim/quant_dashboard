@@ -5,6 +5,7 @@ import time
 import zipfile
 from dataclasses import dataclass
 from datetime import date
+from functools import lru_cache
 from pathlib import Path
 from typing import Literal, Optional
 
@@ -159,7 +160,55 @@ def fetch_ff_industry_daily(
     return df
 
 
+@lru_cache(maxsize=32)
+def _get_full_industry_history(
+    universe: int, weighting: Weighting = "value", return_form: ReturnForm = "log"
+) -> pd.DataFrame:
+    """Download and cache the full history for a given industry universe.
+
+    The result is cached in-process to avoid repeated downloads and keep
+    interactive chart updates responsive. Consumers should slice the returned
+    DataFrame to their desired date range to avoid mutating the cached object.
+    """
+
+    return fetch_ff_industry_daily(
+        universe,
+        weighting=weighting,
+        start_date=None,
+        end_date=None,
+        return_form=return_form,
+    )
+
+
+def get_industry_history(
+    *,
+    universe: int,
+    weighting: Weighting = "value",
+    start_date: Optional[date] = None,
+    end_date: Optional[date] = None,
+    return_form: ReturnForm = "log",
+    refresh: bool = False,
+) -> pd.DataFrame:
+    """Return industry returns, sliced from a cached full-history dataset."""
+
+    if refresh:
+        _get_full_industry_history.cache_clear()
+
+    full_history = _get_full_industry_history(
+        universe, weighting=weighting, return_form=return_form
+    )
+
+    filtered = full_history.copy()
+    if start_date:
+        filtered = filtered.loc[filtered.index >= pd.Timestamp(start_date)]
+    if end_date:
+        filtered = filtered.loc[filtered.index < pd.Timestamp(end_date)]
+
+    return filtered
+
+
 __all__ = [
     "SUPPORTED_INDUSTRY_UNIVERSES",
     "fetch_ff_industry_daily",
+    "get_industry_history",
 ]

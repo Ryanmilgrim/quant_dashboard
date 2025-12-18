@@ -1,13 +1,13 @@
 {% extends 'base.html' %}
 
 {% block content %}
-  <h2>Industry &amp; Factor Universe</h2>
-  <p class="lead">Explore the Fama-French industry and factor data universe with configurable portfolio groupings.</p>
-  <p class="text-muted">We lean on the Fama-French daily industry portfolios because they provide deep, academically vetted history across multiple industry splits. Log returns are enforced throughout the tool to keep compounding consistent and avoid downstream math issues, and you can choose which industry portfolio universe best fits your analysis.</p>
+  <h2 class="mb-1">Investment Universe &ndash; Benchmark Composition</h2>
+  <p class="lead">Select the assets that form your investable universe; this drives the benchmark you will use across the dashboard.</p>
+  <p class="text-muted">We lean on the Fama-French daily industry portfolios for deep, academically vetted history. Log returns are enforced to keep compounding consistent, and the selections below define the benchmark context for downstream analytics.</p>
 
   <form method="post" class="row gy-3 gx-3 align-items-end mb-4">
     <div class="col-md-4">
-      <label class="form-label" for="universe">Industry Universe</label>
+      <label class="form-label" for="universe">Industry universe for the benchmark</label>
       <select class="form-select" id="universe" name="universe">
         {% for u in universes %}
           <option value="{{ u }}" {% if u|string == selected_universe %}selected{% endif %}>{{ u }} Industries</option>
@@ -15,36 +15,37 @@
       </select>
     </div>
     <div class="col-md-4">
-      <label class="form-label">Weighting</label>
+      <label class="form-label">Return weighting for benchmark</label>
       <div class="d-flex gap-3">
         <div class="form-check">
           <input class="form-check-input" type="radio" id="weight_value" name="weighting" value="value" {% if weighting == 'value' %}checked{% endif %}>
-          <label class="form-check-label" for="weight_value">Value</label>
+          <label class="form-check-label" for="weight_value">Value (market-cap) weighted</label>
         </div>
         <div class="form-check">
           <input class="form-check-input" type="radio" id="weight_equal" name="weighting" value="equal" {% if weighting == 'equal' %}checked{% endif %}>
-          <label class="form-check-label" for="weight_equal">Equal</label>
+          <label class="form-check-label" for="weight_equal">Equal weighted</label>
         </div>
       </div>
     </div>
     <div class="col-12">
-      <label class="form-label" for="start_date">Start Date</label>
+      <label class="form-label" for="start_date">Start date for benchmark performance</label>
       <input class="form-control" id="start_date" name="start_date" type="date" value="{{ start_date_value }}">
     </div>
     <div class="col-12">
-      <label class="form-label" for="end_date">End Date</label>
+      <label class="form-label" for="end_date">End date for benchmark performance</label>
       <input class="form-control" id="end_date" name="end_date" type="date" value="{{ end_date_value }}">
     </div>
     <div class="col-12 d-flex flex-column flex-sm-row gap-2 align-items-start align-items-sm-center">
-      <button class="btn btn-primary" type="submit">Update Universe View</button>
-      <p class="text-muted small mb-0">Defaults show the past 50 years ending today for the 5-industry portfolios using log returns.</p>
+      <button class="btn btn-primary" type="submit">Update benchmark view</button>
+      <p class="text-muted small mb-0">Defaults show the past 50 years ending today for the 5-industry portfolios using log returns. Data is cached once and filtered locally for quick redraws.</p>
     </div>
   </form>
 
   {% if chart_data %}
     <div class="card shadow-sm mb-3">
       <div class="card-body">
-        <h5 class="card-title">Historical Price Growth (Index = 100)</h5>
+        <h5 class="card-title">Historical Benchmark Growth (Index = 100)</h5>
+        <p class="text-muted small mb-3">Cumulative growth of the selected benchmark universe; use the controls above to reframe the benchmark before comparing strategies.</p>
         <canvas id="industryChart" height="120"></canvas>
       </div>
     </div>
@@ -77,7 +78,7 @@
               ticks: { maxTicksLimit: 10 },
             },
             y: {
-              title: { display: true, text: 'Index Level' },
+              title: { display: true, text: 'Cumulative Index (base = 100)' },
               ticks: { callback: (value) => value.toLocaleString() },
             },
           },
