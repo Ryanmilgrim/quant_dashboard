@@ -27,6 +27,19 @@
         </div>
       </div>
     </div>
+    <div class="col-md-4">
+      <label class="form-label">Transformation</label>
+      <div class="d-flex gap-3">
+        <div class="form-check">
+          <input class="form-check-input" type="radio" id="transform_level" name="transform_mode" value="level" {% if transform_mode == 'level' %}checked{% endif %}>
+          <label class="form-check-label" for="transform_level">Level (Index = 100)</label>
+        </div>
+        <div class="form-check">
+          <input class="form-check-input" type="radio" id="transform_log" name="transform_mode" value="log" {% if transform_mode == 'log' %}checked{% endif %}>
+          <label class="form-check-label" for="transform_log">Log growth</label>
+        </div>
+      </div>
+    </div>
     <div class="col-12">
       <label class="form-label" for="start_date">Start Date for benchmark window</label>
       <input class="form-control" id="start_date" name="start_date" type="date" value="{{ start_date_value }}">
@@ -42,10 +55,11 @@
   </form>
 
   {% if chart_data %}
+    {% set chart_label = 'Level (Index = 100)' if transform_mode == 'level' else 'Log growth (cumulative log returns)' %}
     <div class="card shadow-sm mb-3">
       <div class="card-body">
-        <h5 class="card-title">Benchmark growth from investment universe (Index = 100)</h5>
-        <p class="card-subtitle text-muted small mb-3">Historical performance of the selected universe; this shapes the benchmark you will compare future portfolios against. Long histories are resampled monthly for a faster, smoother view.</p>
+        <h5 class="card-title">Benchmark growth from investment universe &mdash; {{ chart_label }}</h5>
+        <p class="card-subtitle text-muted small mb-3">Historical performance of the selected universe; this shapes the benchmark you will compare future portfolios against. Long histories are resampled monthly for a faster, smoother view. Switch between rebased levels and cumulative log growth to suit your analysis.</p>
         <div id="industryChart" style="height: 480px;"></div>
       </div>
     </div>
@@ -61,7 +75,7 @@
         x: series.x,
         y: series.y,
         line: { color: palette[idx % palette.length], width: 2, shape: 'spline', smoothing: 0.2 },
-        hovertemplate: '%{x}<br>%{y:.2f}' + '<extra>' + series.name + '</extra>',
+        hovertemplate: '%{x}<br>%{y:.2f}' + (chartData.hover_suffix || '') + '<extra>' + series.name + '</extra>',
       }));
 
       const layout = {
@@ -73,8 +87,8 @@
           automargin: true,
         },
         yaxis: {
-          title: 'Benchmark index level',
-          tickformat: ',.0f',
+          title: chartData.yaxis_title || 'Benchmark index level',
+          tickformat: chartData.yaxis_tickformat || ',.0f',
           automargin: true,
         },
         legend: { orientation: 'h', y: -0.2 },

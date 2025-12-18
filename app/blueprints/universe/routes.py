@@ -11,7 +11,7 @@ from ...services.universe_cache import get_universe_returns
 universe_bp = Blueprint("universe", __name__, url_prefix="/universe")
 
 
-def _prepare_chart_payload(cumulative_growth: pd.DataFrame) -> dict[str, object]:
+def _prepare_chart_payload(cumulative_growth: pd.DataFrame, mode: str) -> dict[str, object]:
     """Prepare a Plotly-friendly payload with light down-sampling for speed."""
 
     df = cumulative_growth.copy()
@@ -19,9 +19,19 @@ def _prepare_chart_payload(cumulative_growth: pd.DataFrame) -> dict[str, object]
     if df.empty:
         return {"series": []}
 
-    # Rebase to 100 so every chart starts at the same anchor and avoids runaway scales
-    # when the cache includes prior history.
-    df = df.div(df.iloc[0]).mul(100)
+    if mode == "level":
+        # Rebase to 100 so every chart starts at the same anchor and avoids runaway scales
+        # when the cache includes prior history.
+        df = df.div(df.iloc[0]).mul(100)
+        yaxis_title = "Benchmark index level (Index = 100)"
+        hover_suffix = ""
+        yaxis_tickformat = ",.0f"
+    else:
+        # Cumulative log returns rebased to 0 for easier comparison and scaled to percent.
+        df = (df - df.iloc[0]).mul(100)
+        yaxis_title = "Cumulative log return (%)"
+        hover_suffix = "%"
+        yaxis_tickformat = ".1f"
 
     # Downsample very long histories to monthly endpoints to keep the plot snappy.
     if len(df) > 1200:
@@ -40,7 +50,13 @@ def _prepare_chart_payload(cumulative_growth: pd.DataFrame) -> dict[str, object]
         for col in df.columns
     ]
 
-    return {"series": series}
+    return {
+        "series": series,
+        "yaxis_title": yaxis_title,
+        "hover_suffix": hover_suffix,
+        "yaxis_tickformat": yaxis_tickformat,
+        "mode": mode,
+    }
 
 
 @universe_bp.route("/", methods=["GET", "POST"])
@@ -52,6 +68,7 @@ def investment_universe():
 
     selected_universe = request.form.get("universe") or "5"
     weighting = request.form.get("weighting", "value")
+    transform_mode = request.form.get("transform_mode", "level")
     start_date_value = request.form.get("start_date") or start_default.isoformat()
     end_date_value = request.form.get("end_date") or end_default.isoformat()
 
@@ -63,6 +80,9 @@ def investment_universe():
         if weighting not in {"value", "equal"}:
             raise ValueError("Unsupported weighting")
 
+        if transform_mode not in {"level", "log"}:
+            raise ValueError("Unsupported transform mode")
+
         start_date = date.fromisoformat(start_date_value)
         end_date = date.fromisoformat(end_date_value)
 
@@ -71,8 +91,12 @@ def investment_universe():
         if df.empty:
             flash("No data returned for the requested range.", "warning")
         else:
-            cumulative_growth = np.exp(df.cumsum()) * 100
-            chart_data = _prepare_chart_payload(cumulative_growth)
+            if transform_mode == "level":
+                cumulative_growth = np.exp(df.cumsum()) * 100
+            else:
+                cumulative_growth = df.cumsum()
+
+            chart_data = _prepare_chart_payload(cumulative_growth, mode=transform_mode)
     except ValueError:
         if request.method == "POST":
             flash("Please provide valid inputs.", "danger")
@@ -86,6 +110,7 @@ def investment_universe():
         universes=SUPPORTED_INDUSTRY_UNIVERSES,
         selected_universe=selected_universe,
         weighting=weighting,
+        transform_mode=transform_mode,
         start_date_value=start_date_value,
         end_date_value=end_date_value,
     )
