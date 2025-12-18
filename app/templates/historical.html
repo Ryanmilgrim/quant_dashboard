@@ -1,13 +1,13 @@
 {% extends 'base.html' %}
 
 {% block content %}
-  <h2>Industry &amp; Factor Universe</h2>
-  <p class="lead">Explore the Fama-French industry and factor data universe with configurable portfolio groupings.</p>
-  <p class="text-muted">We lean on the Fama-French daily industry portfolios because they provide deep, academically vetted history across multiple industry splits. Log returns are enforced throughout the tool to keep compounding consistent and avoid downstream math issues, and you can choose which industry portfolio universe best fits your analysis.</p>
+  <h2>Investment Universe &ndash; Benchmark Composition</h2>
+  <p class="lead">Select the assets that form your investment universe. This will serve as the basis for your benchmark portfolio and downstream performance comparisons.</p>
+  <p class="text-muted">The tool relies on Fama-French daily industry portfolios for long, academically vetted history. Log returns keep compounding consistent and avoid downstream math surprises. Choose the industry granularity and weighting that best mirrors your investment approach, then view how that benchmark would have evolved over time.</p>
 
   <form method="post" class="row gy-3 gx-3 align-items-end mb-4">
     <div class="col-md-4">
-      <label class="form-label" for="universe">Industry Universe</label>
+      <label class="form-label" for="universe">Industry Universe (benchmark building blocks)</label>
       <select class="form-select" id="universe" name="universe">
         {% for u in universes %}
           <option value="{{ u }}" {% if u|string == selected_universe %}selected{% endif %}>{{ u }} Industries</option>
@@ -15,28 +15,28 @@
       </select>
     </div>
     <div class="col-md-4">
-      <label class="form-label">Weighting</label>
+      <label class="form-label">Weighting Scheme</label>
       <div class="d-flex gap-3">
         <div class="form-check">
           <input class="form-check-input" type="radio" id="weight_value" name="weighting" value="value" {% if weighting == 'value' %}checked{% endif %}>
-          <label class="form-check-label" for="weight_value">Value</label>
+          <label class="form-check-label" for="weight_value">Value-weighted benchmark</label>
         </div>
         <div class="form-check">
           <input class="form-check-input" type="radio" id="weight_equal" name="weighting" value="equal" {% if weighting == 'equal' %}checked{% endif %}>
-          <label class="form-check-label" for="weight_equal">Equal</label>
+          <label class="form-check-label" for="weight_equal">Equal-weighted benchmark</label>
         </div>
       </div>
     </div>
     <div class="col-12">
-      <label class="form-label" for="start_date">Start Date</label>
+      <label class="form-label" for="start_date">Start Date for benchmark window</label>
       <input class="form-control" id="start_date" name="start_date" type="date" value="{{ start_date_value }}">
     </div>
     <div class="col-12">
-      <label class="form-label" for="end_date">End Date</label>
+      <label class="form-label" for="end_date">End Date for benchmark window</label>
       <input class="form-control" id="end_date" name="end_date" type="date" value="{{ end_date_value }}">
     </div>
     <div class="col-12 d-flex flex-column flex-sm-row gap-2 align-items-start align-items-sm-center">
-      <button class="btn btn-primary" type="submit">Update Universe View</button>
+      <button class="btn btn-primary" type="submit">Refresh benchmark view</button>
       <p class="text-muted small mb-0">Defaults show the past 50 years ending today for the 5-industry portfolios using log returns.</p>
     </div>
   </form>
@@ -44,49 +44,45 @@
   {% if chart_data %}
     <div class="card shadow-sm mb-3">
       <div class="card-body">
-        <h5 class="card-title">Historical Price Growth (Index = 100)</h5>
-        <canvas id="industryChart" height="120"></canvas>
+        <h5 class="card-title">Benchmark growth from investment universe (Index = 100)</h5>
+        <p class="card-subtitle text-muted small mb-3">Historical performance of the selected universe; this shapes the benchmark you will compare future portfolios against. Long histories are resampled monthly for a faster, smoother view.</p>
+        <div id="industryChart" style="height: 480px;"></div>
       </div>
     </div>
-    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://cdn.plot.ly/plotly-2.35.0.min.js" crossorigin="anonymous"></script>
     <script>
       const chartData = {{ chart_data | tojson }};
       const palette = ['#2563eb', '#16a34a', '#ea580c', '#9333ea', '#0f172a', '#e11d48', '#0284c7', '#a855f7'];
-      const datasets = chartData.series.map((series, idx) => ({
-        label: series.label,
-        data: series.data,
-        borderColor: palette[idx % palette.length],
-        backgroundColor: palette[idx % palette.length],
-        borderWidth: 2,
-        pointRadius: 0,
-        tension: 0.2,
+
+      const traces = chartData.series.map((series, idx) => ({
+        type: 'scatter',
+        mode: 'lines',
+        name: series.name,
+        x: series.x,
+        y: series.y,
+        line: { color: palette[idx % palette.length], width: 2, shape: 'spline', smoothing: 0.2 },
+        hovertemplate: '%{x}<br>%{y:.2f}' + '<extra>' + series.name + '</extra>',
       }));
 
-      new Chart(document.getElementById('industryChart'), {
-        type: 'line',
-        data: {
-          labels: chartData.dates,
-          datasets,
+      const layout = {
+        margin: { t: 40, r: 20, b: 60, l: 60 },
+        xaxis: {
+          title: 'Date',
+          rangeslider: { visible: true },
+          tickformat: '%b %Y',
+          automargin: true,
         },
-        options: {
-          responsive: true,
-          maintainAspectRatio: false,
-          scales: {
-            x: {
-              title: { display: true, text: 'Date' },
-              ticks: { maxTicksLimit: 10 },
-            },
-            y: {
-              title: { display: true, text: 'Index Level' },
-              ticks: { callback: (value) => value.toLocaleString() },
-            },
-          },
-          plugins: {
-            tooltip: { mode: 'index', intersect: false },
-            legend: { position: 'bottom' },
-          },
+        yaxis: {
+          title: 'Benchmark index level',
+          tickformat: ',.0f',
+          automargin: true,
         },
-      });
+        legend: { orientation: 'h', y: -0.2 },
+        hovermode: 'x unified',
+        template: 'plotly_white',
+      };
+
+      Plotly.newPlot('industryChart', traces, layout, { displaylogo: false, responsive: true });
     </script>
   {% else %}
     <p class="text-muted">No chart data available for the selected configuration.</p>
