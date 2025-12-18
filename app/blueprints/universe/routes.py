@@ -1,4 +1,4 @@
-from datetime import date, timedelta
+from datetime import date, datetime
 from typing import Optional
 
 import numpy as np
@@ -6,7 +6,7 @@ import pandas as pd
 from flask import Blueprint, flash, render_template, request
 
 from ...services.market_data import SUPPORTED_INDUSTRY_UNIVERSES
-from ...services.universe_cache import get_universe_returns
+from ...services.universe_cache import get_universe_returns, get_universe_start_date
 
 universe_bp = Blueprint("universe", __name__, url_prefix="/universe")
 
@@ -16,8 +16,9 @@ def _prepare_chart_payload(
     *,
     rebase_to_100: bool = True,
     y_axis_title: str = "Benchmark index level (base = 100)",
+    max_points: Optional[int] = 900,
 ) -> dict[str, object]:
-    """Prepare a Plotly-friendly payload with light down-sampling for speed."""
+    """Prepare a Plotly-friendly payload with optional down-sampling for speed."""
 
     df = cumulative_growth.copy()
 
@@ -29,14 +30,9 @@ def _prepare_chart_payload(
         # when the cache includes prior history.
         df = df.div(df.iloc[0]).mul(100)
 
-    # Downsample very long histories to monthly endpoints to keep the plot snappy.
-    if len(df) > 1200:
-        df = df.resample("M").last()
-
-    # Additional thinning when the browser payload would still be large. This keeps
-    # roughly ~900 points (or fewer) evenly spaced for smooth Plotly rendering.
-    max_points = 900
-    if len(df) > max_points:
+    # Thin when requested and the browser payload would still be large. This keeps
+    # roughly ~max_points evenly spaced for smooth Plotly rendering.
+    if max_points is not None and len(df) > max_points:
         take_idx = np.linspace(0, len(df) - 1, max_points, dtype=int)
         df = df.iloc[take_idx]
 
@@ -53,14 +49,12 @@ def _prepare_chart_payload(
 @universe_bp.route("/historical", methods=["GET", "POST"])
 def investment_universe():
     chart_data: Optional[dict] = None
-    end_default = date.today()
-    start_default = end_default - timedelta(days=365 * 50)
 
     selected_universe = request.form.get("universe") or "5"
     weighting = "value"
     transform = request.form.get("transform", "index")
-    start_date_value = request.form.get("start_date") or start_default.isoformat()
-    end_date_value = request.form.get("end_date") or end_default.isoformat()
+    frequency = request.form.get("frequency", "monthly")
+    start_date_value = request.form.get("start_date")
 
     try:
         universe = int(selected_universe)
@@ -70,10 +64,26 @@ def investment_universe():
         if transform not in {"index", "log"}:
             raise ValueError("Unsupported transform option")
 
-        start_date = date.fromisoformat(start_date_value)
-        end_date = date.fromisoformat(end_date_value)
+        if frequency not in {"daily", "monthly"}:
+            raise ValueError("Unsupported frequency option")
 
-        df = get_universe_returns(universe, weighting=weighting, start_date=start_date, end_date=end_date)
+        earliest_start = get_universe_start_date(universe, weighting)
+        earliest_start_display = earliest_start.strftime("%m/%d/%y")
+
+        start_date_display = start_date_value or earliest_start_display
+        start_date = datetime.strptime(start_date_display, "%m/%d/%y").date()
+
+        # Two-digit years default to 2000-2068/1900-1999; adjust older history to keep
+        # early Fama-French periods intact when defaulting to the 1930s.
+        if start_date > date.today():
+            start_date = start_date.replace(year=start_date.year - 100)
+
+        df = get_universe_returns(universe, weighting=weighting, start_date=start_date)
+
+        if frequency == "monthly":
+            df = df.resample("M").sum()
+
+        max_points = None if frequency == "daily" else 900
 
         if df.empty:
             flash("No data returned for the requested range.", "warning")
@@ -87,9 +97,16 @@ def investment_universe():
                     log_growth,
                     rebase_to_100=False,
                     y_axis_title="Log price growth (relative to start)",
+                    max_points=max_points,
                 )
             else:
-                chart_data = _prepare_chart_payload(price_index)
+                chart_data = _prepare_chart_payload(
+                    price_index,
+                    max_points=max_points,
+                )
+
+            if chart_data is not None:
+                chart_data["frequency"] = frequency
     except ValueError:
         if request.method == "POST":
             flash("Please provide valid inputs.", "danger")
@@ -103,6 +120,6 @@ def investment_universe():
         universes=SUPPORTED_INDUSTRY_UNIVERSES,
         selected_universe=selected_universe,
         transform=transform,
-        start_date_value=start_date_value,
-        end_date_value=end_date_value,
+        frequency=frequency,
+        start_date_value=start_date_display if "start_date_display" in locals() else None,
     )

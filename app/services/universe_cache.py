@@ -51,6 +51,17 @@ def get_universe_returns(
     return df
 
 
+def get_universe_start_date(universe: int, weighting: Weighting) -> date:
+    """Return the earliest available date for a universe/weighting pair."""
+
+    df = _get_full_universe(universe, weighting)
+
+    if df.empty:
+        raise ValueError("No data available for the requested universe.")
+
+    return df.index.min().date()
+
+
 def clear_universe_cache() -> None:
     """Expose cache clearing for testing or manual refreshes."""
 
