@@ -62,6 +62,7 @@
     <script src="https://cdn.plot.ly/plotly-2.35.0.min.js" crossorigin="anonymous"></script>
     <script>
       const chartData = {{ chart_data | tojson }};
+      const isDaily = chartData.frequency === 'daily';
       let industryLegendShown = false;
 
       const traces = chartData.series.map((series) => {
@@ -100,7 +101,7 @@
         xaxis: {
           title: 'Date',
           rangeslider: { visible: true },
-          tickformat: '%b %Y',
+          tickformat: isDaily ? '%d/%m/%y' : '%b %Y',
           automargin: true,
         },
         yaxis: {

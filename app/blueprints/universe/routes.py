@@ -97,6 +97,9 @@ def investment_universe():
                     price_index,
                     max_points=max_points,
                 )
+
+            if chart_data is not None:
+                chart_data["frequency"] = frequency
     except ValueError:
         if request.method == "POST":
             flash("Please provide valid inputs.", "danger")
