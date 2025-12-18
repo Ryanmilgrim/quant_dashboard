@@ -36,14 +36,11 @@
     <div class="col-12">
       <label class="form-label" for="start_date">Start Date for benchmark window</label>
       <input class="form-control" id="start_date" name="start_date" type="date" value="{{ start_date_value }}">
-    </div>
-    <div class="col-12">
-      <label class="form-label" for="end_date">End Date for benchmark window</label>
-      <input class="form-control" id="end_date" name="end_date" type="date" value="{{ end_date_value }}">
+      <p class="form-text">Defaults to the earliest available Fama-French daily industry data.</p>
     </div>
     <div class="col-12 d-flex flex-column flex-sm-row gap-2 align-items-start align-items-sm-center">
       <button class="btn btn-primary" type="submit">Refresh benchmark view</button>
-      <p class="text-muted small mb-0">Defaults show the past 50 years ending today for the 5-industry portfolios using log returns.</p>
+      <p class="text-muted small mb-0">Defaults show the full available history ending today for the 5-industry portfolios using log returns.</p>
     </div>
   </form>
 
@@ -58,19 +55,20 @@
     <script src="https://cdn.plot.ly/plotly-2.35.0.min.js" crossorigin="anonymous"></script>
     <script>
       const chartData = {{ chart_data | tojson }};
-      const palette = ['#2563eb', '#16a34a', '#ea580c', '#9333ea', '#0f172a', '#e11d48', '#0284c7', '#a855f7'];
-
-      const hoverFmt = chartData.y_axis_title && chartData.y_axis_title.toLowerCase().includes('log') ? '.4f' : '.2f';
-
-      const traces = chartData.series.map((series, idx) => ({
+      const traces = chartData.series.map((series) => ({
         type: 'scatter',
         mode: 'lines',
         name: series.name,
         x: series.x,
         y: series.y,
-        line: { color: palette[idx % palette.length], width: series.name === 'Benchmark' ? 3 : 2, shape: 'spline', smoothing: 0.2 },
-        hoverinfo: 'x+y+name',
-        hovertemplate: '%{x}<br>%{y' + hoverFmt + '}' + '<extra>' + series.name + '</extra>',
+        line: {
+          color: series.name === 'Benchmark' ? '#dc2626' : '#9ca3af',
+          width: series.name === 'Benchmark' ? 3 : 2,
+          shape: 'spline',
+          smoothing: 0.2,
+        },
+        hoverinfo: 'name',
+        hovertemplate: '<b>%{fullData.name}</b><extra></extra>',
       }));
 
       const layout = {
@@ -86,7 +84,7 @@
           tickformat: chartData.y_axis_title && chartData.y_axis_title.toLowerCase().includes('log') ? '.2f' : ',.0f',
           automargin: true,
         },
-        legend: { orientation: 'h', y: -0.2 },
+        legend: { orientation: 'h', y: -0.2, title: { text: '' } },
         hovermode: 'closest',
         template: 'plotly_white',
       };

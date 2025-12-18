@@ -1,4 +1,4 @@
-from datetime import date, timedelta
+from datetime import date
 from typing import Optional
 
 import numpy as np
@@ -6,7 +6,7 @@ import pandas as pd
 from flask import Blueprint, flash, render_template, request
 
 from ...services.market_data import SUPPORTED_INDUSTRY_UNIVERSES
-from ...services.universe_cache import get_universe_returns
+from ...services.universe_cache import get_universe_returns, get_universe_start_date
 
 universe_bp = Blueprint("universe", __name__, url_prefix="/universe")
 
@@ -53,14 +53,11 @@ def _prepare_chart_payload(
 @universe_bp.route("/historical", methods=["GET", "POST"])
 def investment_universe():
     chart_data: Optional[dict] = None
-    end_default = date.today()
-    start_default = end_default - timedelta(days=365 * 50)
 
     selected_universe = request.form.get("universe") or "5"
     weighting = "value"
     transform = request.form.get("transform", "index")
-    start_date_value = request.form.get("start_date") or start_default.isoformat()
-    end_date_value = request.form.get("end_date") or end_default.isoformat()
+    start_date_value = request.form.get("start_date")
 
     try:
         universe = int(selected_universe)
@@ -70,10 +67,11 @@ def investment_universe():
         if transform not in {"index", "log"}:
             raise ValueError("Unsupported transform option")
 
+        earliest_start = get_universe_start_date(universe, weighting)
+        start_date_value = start_date_value or earliest_start.isoformat()
         start_date = date.fromisoformat(start_date_value)
-        end_date = date.fromisoformat(end_date_value)
 
-        df = get_universe_returns(universe, weighting=weighting, start_date=start_date, end_date=end_date)
+        df = get_universe_returns(universe, weighting=weighting, start_date=start_date)
 
         if df.empty:
             flash("No data returned for the requested range.", "warning")
@@ -104,5 +102,4 @@ def investment_universe():
         selected_universe=selected_universe,
         transform=transform,
         start_date_value=start_date_value,
-        end_date_value=end_date_value,
     )
