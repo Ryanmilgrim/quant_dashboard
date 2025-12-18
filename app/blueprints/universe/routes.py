@@ -29,12 +29,8 @@ def _prepare_chart_payload(
         # when the cache includes prior history.
         df = df.div(df.iloc[0]).mul(100)
 
-    # Downsample very long histories to monthly endpoints to keep the plot snappy.
-    if len(df) > 1200:
-        df = df.resample("M").last()
-
-    # Additional thinning when the browser payload would still be large. This keeps
-    # roughly ~900 points (or fewer) evenly spaced for smooth Plotly rendering.
+    # Thin when the browser payload would still be large. This keeps roughly ~900
+    # points (or fewer) evenly spaced for smooth Plotly rendering.
     max_points = 900
     if len(df) > max_points:
         take_idx = np.linspace(0, len(df) - 1, max_points, dtype=int)
@@ -57,6 +53,7 @@ def investment_universe():
     selected_universe = request.form.get("universe") or "5"
     weighting = "value"
     transform = request.form.get("transform", "index")
+    frequency = request.form.get("frequency", "monthly")
     start_date_value = request.form.get("start_date")
 
     try:
@@ -67,11 +64,17 @@ def investment_universe():
         if transform not in {"index", "log"}:
             raise ValueError("Unsupported transform option")
 
+        if frequency not in {"daily", "monthly"}:
+            raise ValueError("Unsupported frequency option")
+
         earliest_start = get_universe_start_date(universe, weighting)
         start_date_value = start_date_value or earliest_start.isoformat()
         start_date = date.fromisoformat(start_date_value)
 
         df = get_universe_returns(universe, weighting=weighting, start_date=start_date)
+
+        if frequency == "monthly":
+            df = df.resample("M").sum()
 
         if df.empty:
             flash("No data returned for the requested range.", "warning")
@@ -101,5 +104,6 @@ def investment_universe():
         universes=SUPPORTED_INDUSTRY_UNIVERSES,
         selected_universe=selected_universe,
         transform=transform,
+        frequency=frequency,
         start_date_value=start_date_value,
     )
