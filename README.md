@@ -25,8 +25,8 @@ A starter Flask application for showcasing quant finance projects. The initial f
 
 - `app.py` – entry point creating the Flask app.
 - `app/` – core package
-  - `routes.py` – page routing and forms
-  - `services/` – market data retrieval and pricing utilities
-  - `templates/` – Jinja templates for each page
+  - `blueprints/` – modular feature areas (core landing page, investment universe, option pricing)
+  - `services/` – market data retrieval, pricing utilities, and cached universe loaders
+  - `templates/` – Jinja templates shared across features
 
 Use this as a base to add new quant experiments and visualizations.
