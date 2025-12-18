@@ -55,21 +55,38 @@
     <script src="https://cdn.plot.ly/plotly-2.35.0.min.js" crossorigin="anonymous"></script>
     <script>
       const chartData = {{ chart_data | tojson }};
-      const traces = chartData.series.map((series) => ({
-        type: 'scatter',
-        mode: 'lines',
-        name: series.name,
-        x: series.x,
-        y: series.y,
-        line: {
-          color: series.name === 'Benchmark' ? '#dc2626' : '#9ca3af',
-          width: series.name === 'Benchmark' ? 3 : 2,
-          shape: 'spline',
-          smoothing: 0.2,
-        },
-        hoverinfo: 'name',
-        hovertemplate: '<b>%{fullData.name}</b><extra></extra>',
-      }));
+      let industryLegendShown = false;
+
+      const traces = chartData.series.map((series) => {
+        const isBenchmark = series.name === 'Benchmark';
+        const isIndustry = !isBenchmark;
+        const showIndustryLegend = isIndustry && !industryLegendShown;
+        const traceName = isBenchmark ? 'Benchmark' : showIndustryLegend ? 'Industries' : series.name;
+        const hoverLabel = series.name;
+
+        if (showIndustryLegend) {
+          industryLegendShown = true;
+        }
+
+        return {
+          type: 'scatter',
+          mode: 'lines',
+          name: traceName,
+          x: series.x,
+          y: series.y,
+          line: {
+            color: isBenchmark ? '#dc2626' : '#9ca3af',
+            width: isBenchmark ? 3 : 2,
+            shape: 'spline',
+            smoothing: 0.2,
+          },
+          legendgroup: isBenchmark ? 'Benchmark' : 'Industries',
+          showlegend: isBenchmark || showIndustryLegend,
+          hoverinfo: 'name',
+          customdata: Array(series.y.length).fill(hoverLabel),
+          hovertemplate: '<b>%{customdata}</b><extra></extra>',
+        };
+      });
 
       const layout = {
         margin: { t: 40, r: 20, b: 60, l: 60 },
