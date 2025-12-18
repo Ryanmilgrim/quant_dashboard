@@ -1,12 +1,22 @@
 from datetime import date
 from typing import Optional
 
-from flask import Blueprint, flash, redirect, render_template, request, url_for
+from flask import Blueprint, flash, render_template, request
 
-from .services.market_data import fetch_price_history
+from .services.market_data import (
+    SUPPORTED_INDUSTRY_UNIVERSES,
+    ReturnForm,
+    Weighting,
+    build_ff_daily_panel,
+    format_panel_for_display,
+)
 from .services.options import black_scholes_price
 
 main_bp = Blueprint("main", __name__)
+
+
+def _parse_date(value: str) -> Optional[date]:
+    return date.fromisoformat(value) if value else None
 
 
 @main_bp.route("/")
@@ -17,29 +27,41 @@ def index():
 @main_bp.route("/historical", methods=["GET", "POST"])
 def historical_prices():
     data_html: Optional[str] = None
+    form_values = {
+        "universe": request.form.get("universe", "49"),
+        "weighting": request.form.get("weighting", "value"),
+        "return_form": request.form.get("return_form", "log"),
+        "start_date": request.form.get("start_date", ""),
+        "end_date": request.form.get("end_date", ""),
+    }
+
     if request.method == "POST":
-        ticker = request.form.get("ticker", "").strip().upper()
-        start = request.form.get("start_date")
-        end = request.form.get("end_date")
-
-        if not ticker:
-            flash("Please provide a ticker symbol.", "warning")
-            return redirect(url_for("main.historical_prices"))
-
         try:
-            start_date = date.fromisoformat(start) if start else None
-            end_date = date.fromisoformat(end) if end else None
-            df = fetch_price_history(ticker, start_date=start_date, end_date=end_date)
-            if df is None or df.empty:
-                flash("No data returned for the requested range.", "warning")
-            else:
-                data_html = df.tail(50).to_html(classes="table table-striped table-sm", border=0)
-        except ValueError:
-            flash("Invalid date format. Please use YYYY-MM-DD.", "danger")
-        except Exception:
-            flash("Unable to retrieve market data right now.", "danger")
+            universe = int(form_values["universe"])
+            weighting: Weighting = form_values["weighting"]  # type: ignore[assignment]
+            return_form: ReturnForm = form_values["return_form"]  # type: ignore[assignment]
+            start_date = _parse_date(form_values["start_date"])
+            end_date = _parse_date(form_values["end_date"])
 
-    return render_template("historical.html", data_table=data_html)
+            panel = build_ff_daily_panel(
+                industry_universe=universe,
+                weighting=weighting,
+                return_form=return_form,
+                start_date=start_date,
+                end_date=end_date,
+            )
+            data_html = format_panel_for_display(panel)
+        except ValueError:
+            flash("Please provide valid inputs.", "danger")
+        except Exception:
+            flash("Unable to retrieve Fama-French data right now.", "danger")
+
+    return render_template(
+        "historical.html",
+        data_table=data_html,
+        universes=SUPPORTED_INDUSTRY_UNIVERSES,
+        form_values=form_values,
+    )
 
 
 @main_bp.route("/black-scholes", methods=["GET", "POST"])
