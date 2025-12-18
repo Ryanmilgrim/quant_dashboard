@@ -12,12 +12,12 @@
   <body>
     <nav class="navbar navbar-expand-lg navbar-dark bg-dark mb-4">
       <div class="container-fluid">
-        <a class="navbar-brand" href="{{ url_for('main.index') }}">Quant Dashboard</a>
+        <a class="navbar-brand" href="{{ url_for('core.index') }}">Quant Dashboard</a>
         <div>
-          <ul class="navbar-nav me-auto mb-2 mb-lg-0">
-            <li class="nav-item"><a class="nav-link" href="{{ url_for('main.historical_prices') }}">Industry &amp; Factor Universe</a></li>
-            <li class="nav-item"><a class="nav-link" href="{{ url_for('main.black_scholes_view') }}">Black-Scholes</a></li>
-          </ul>
+            <ul class="navbar-nav me-auto mb-2 mb-lg-0">
+              <li class="nav-item"><a class="nav-link" href="{{ url_for('universe.investment_universe') }}">Investment Universe</a></li>
+              <li class="nav-item"><a class="nav-link" href="{{ url_for('options.black_scholes_view') }}">Black-Scholes</a></li>
+            </ul>
         </div>
       </div>
     </nav>
