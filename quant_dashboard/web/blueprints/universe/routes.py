@@ -80,15 +80,23 @@ def investment_universe():
 
         df = get_universe_returns(universe, weighting=weighting, start_date=start_date)
 
+        asset_returns = df["Assets"] if isinstance(df.columns, pd.MultiIndex) else df
+        benchmark_returns = pd.DataFrame(index=df.index)
+        if isinstance(df.columns, pd.MultiIndex) and "Benchmarks" in df.columns.get_level_values(0):
+            benchmark_slice = df["Benchmarks"]
+            if "Mkt" in benchmark_slice.columns:
+                benchmark_returns = benchmark_slice[["Mkt"]].rename(columns={"Mkt": "Benchmark"})
+        chart_returns = pd.concat([benchmark_returns, asset_returns], axis=1)
+
         if frequency == "monthly":
-            df = df.resample("M").sum()
+            chart_returns = chart_returns.resample("M").sum()
 
         max_points = None if frequency == "daily" else 900
 
-        if df.empty:
+        if chart_returns.empty:
             flash("No data returned for the requested range.", "warning")
         else:
-            cumulative_log = df.cumsum()
+            cumulative_log = chart_returns.cumsum()
             price_index = np.exp(cumulative_log) * 100
 
             if transform == "log":
