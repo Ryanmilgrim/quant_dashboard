@@ -45,6 +45,7 @@ quant_dashboard/
   lib/                  # Pure, reusable quant library (no Flask imports)
     pricing/            # Option pricing utilities (e.g., Black-Scholes)
     data/               # Market data adapters
+    timeseries/         # Return transforms and time-series helpers
     universe/           # Universe loading and caching helpers
   web/                  # Flask presentation layer
     blueprints/         # Modular routes for each feature area

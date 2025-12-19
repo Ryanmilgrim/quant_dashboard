@@ -12,6 +12,8 @@ import numpy as np
 import pandas as pd
 import requests
 
+from quant_dashboard.lib.timeseries.returns import to_log_returns
+
 Weighting = Literal["value", "equal"]
 JoinHow = Literal["inner", "outer"]
 ReturnForm = Literal["simple", "log"]
@@ -160,14 +162,6 @@ def _normalize_factor_columns(df: pd.DataFrame) -> pd.DataFrame:
     return df.rename(columns=rename)
 
 
-def _to_log_returns(simple: pd.DataFrame) -> pd.DataFrame:
-    out = simple.copy()
-    bad = out <= -1.0
-    if bad.any().any():
-        out = out.mask(bad, np.nan)
-    return np.log1p(out)
-
-
 def fetch_ff_industry_daily(
     universe: int,
     *,
@@ -201,7 +195,7 @@ def fetch_ff_industry_daily(
         df = df.loc[df.index < pd.Timestamp(end_date)]
 
     if return_form == "log":
-        df = _to_log_returns(df)
+        df = to_log_returns(df)
     elif return_form != "simple":
         raise ValueError("return_form must be 'simple' or 'log'.")
 
@@ -243,7 +237,7 @@ def fetch_ff_factors_daily(
         df = df.loc[df.index < pd.Timestamp(end_date)]
 
     if return_form == "log":
-        df = _to_log_returns(df)
+        df = to_log_returns(df)
     elif return_form != "simple":
         raise ValueError("return_form must be 'simple' or 'log'.")
 

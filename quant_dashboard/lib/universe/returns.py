@@ -3,7 +3,6 @@ from __future__ import annotations
 from datetime import date
 from typing import Optional
 
-import numpy as np
 import pandas as pd
 
 from quant_dashboard.lib.data.french_industry import (
@@ -12,14 +11,7 @@ from quant_dashboard.lib.data.french_industry import (
     fetch_ff_factors_daily,
     fetch_ff_industry_daily,
 )
-
-
-def _to_log_returns(simple: pd.DataFrame) -> pd.DataFrame:
-    out = simple.copy()
-    bad = out <= -1.0
-    if bad.any().any():
-        out = out.mask(bad, np.nan)
-    return np.log1p(out)
+from quant_dashboard.lib.timeseries.returns import to_log_returns
 
 
 def get_universe_returns(
@@ -47,8 +39,14 @@ def get_universe_returns(
         universe,
         weighting=weighting,
         return_form="simple",
+        start_date=start_date,
+        end_date=end_date,
     )
-    factors = fetch_ff_factors_daily(return_form="simple")
+    factors = fetch_ff_factors_daily(
+        return_form="simple",
+        start_date=start_date,
+        end_date=end_date,
+    )
 
     benchmarks = pd.DataFrame(
         {
@@ -70,7 +68,7 @@ def get_universe_returns(
     combined.columns.names = ["group", "series"]
 
     if return_form == "log":
-        combined = _to_log_returns(combined)
+        combined = to_log_returns(combined)
     elif return_form != "simple":
         raise ValueError("return_form must be 'simple' or 'log'.")
 
