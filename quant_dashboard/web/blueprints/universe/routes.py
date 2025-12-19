@@ -6,7 +6,10 @@ import pandas as pd
 from flask import Blueprint, flash, render_template, request
 
 from quant_dashboard.lib.data import SUPPORTED_INDUSTRY_UNIVERSES
-from quant_dashboard.lib.universe import get_universe_returns, get_universe_start_date
+from quant_dashboard.web.services.universe_cache import (
+    get_universe_returns_cached,
+    get_universe_start_date_cached,
+)
 
 universe_bp = Blueprint("universe", __name__, url_prefix="/universe")
 
@@ -45,6 +48,17 @@ def _prepare_chart_payload(
     return {"series": series, "y_axis_title": y_axis_title}
 
 
+def _build_equal_weight_benchmark(log_returns: pd.DataFrame) -> pd.Series:
+    if log_returns.empty:
+        return pd.Series(dtype=float, index=log_returns.index, name="Benchmark")
+
+    simple = np.expm1(log_returns)
+    benchmark_simple = simple.mean(axis=1)
+    benchmark_log = np.log1p(benchmark_simple)
+    benchmark_log.name = "Benchmark"
+    return benchmark_log
+
+
 @universe_bp.route("/", methods=["GET", "POST"])
 @universe_bp.route("/historical", methods=["GET", "POST"])
 def investment_universe():
@@ -67,7 +81,7 @@ def investment_universe():
         if frequency not in {"daily", "monthly"}:
             raise ValueError("Unsupported frequency option")
 
-        earliest_start = get_universe_start_date(universe, weighting)
+        earliest_start = get_universe_start_date_cached(universe, weighting)
         earliest_start_display = earliest_start.strftime("%m/%d/%y")
 
         start_date_display = start_date_value or earliest_start_display
@@ -78,17 +92,23 @@ def investment_universe():
         if start_date > date.today():
             start_date = start_date.replace(year=start_date.year - 100)
 
-        df = get_universe_returns(universe, weighting=weighting, start_date=start_date)
+        df = get_universe_returns_cached(universe, weighting=weighting, start_date=start_date)
+        asset_returns = df["assets"] if not df.empty else df
+
+        if not asset_returns.empty:
+            benchmark = _build_equal_weight_benchmark(asset_returns)
+            asset_returns = asset_returns.copy()
+            asset_returns.insert(0, "Benchmark", benchmark)
 
         if frequency == "monthly":
-            df = df.resample("M").sum()
+            asset_returns = asset_returns.resample("M").sum()
 
         max_points = None if frequency == "daily" else 900
 
-        if df.empty:
+        if asset_returns.empty:
             flash("No data returned for the requested range.", "warning")
         else:
-            cumulative_log = df.cumsum()
+            cumulative_log = asset_returns.cumsum()
             price_index = np.exp(cumulative_log) * 100
 
             if transform == "log":

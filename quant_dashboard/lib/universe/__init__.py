@@ -1,13 +1,8 @@
-"""Universe loading and caching utilities."""
+"""Universe data helpers."""
 
-from .cache import (
-    clear_universe_cache,
-    get_universe_returns,
-    get_universe_start_date,
-)
+from .cache import get_universe_returns, get_universe_start_date
 
 __all__ = [
-    "clear_universe_cache",
     "get_universe_returns",
     "get_universe_start_date",
 ]

@@ -1,68 +1,92 @@
 from __future__ import annotations
 
 from datetime import date
-from functools import lru_cache
 from typing import Optional
 
+import numpy as np
 import pandas as pd
 
-from quant_dashboard.lib.data.french_industry import Weighting, fetch_ff_industry_daily
+from quant_dashboard.lib.data.french_industry import (
+    ReturnForm,
+    Weighting,
+    fetch_ff_factors_daily,
+    fetch_ff_industry_daily,
+)
 
 
-@lru_cache(maxsize=32)
-def _get_full_universe(universe: int, weighting: Weighting) -> pd.DataFrame:
-    """Download and cache the full history for a universe/weighting pair."""
-    return fetch_ff_industry_daily(
-        universe,
-        weighting=weighting,
-        return_form="log",
-    )
+def _to_log_returns(simple: pd.DataFrame) -> pd.DataFrame:
+    out = simple.copy()
+    bad = out <= -1.0
+    if bad.any().any():
+        out = out.mask(bad, np.nan)
+    return np.log1p(out)
 
 
 def get_universe_returns(
     universe: int,
     *,
-    weighting: Weighting,
+    weighting: Weighting = "value",
+    return_form: ReturnForm = "log",
     start_date: Optional[date] = None,
     end_date: Optional[date] = None,
 ) -> pd.DataFrame:
-    """Return a filtered slice of cached universe returns.
+    """Return daily Fama-French universe returns with factor and benchmark series.
 
-    Data is cached in-memory so repeated requests avoid re-downloading or
-    re-parsing the source files. Callers can optionally slice by start and end
-    date without triggering a new fetch.
+    The result has MultiIndex columns with top-level groups:
+    - "assets": industry portfolio returns for the selected universe
+    - "factors": SMB, HML, and Mkt-Rf
+    - "benchmarks": Mkt (Mkt-Rf + Rf) and Rf
+
+    Returns are expressed in decimal form. If ``return_form`` is "log", Mkt is
+    computed from simple returns before the log transform is applied. Series
+    are aligned on shared dates (inner join). Date filters are inclusive of
+    ``start_date`` and exclusive of ``end_date``.
     """
 
-    df = _get_full_universe(universe, weighting)
+    industries = fetch_ff_industry_daily(
+        universe,
+        weighting=weighting,
+        return_form="simple",
+    )
+    factors = fetch_ff_factors_daily(return_form="simple")
+
+    benchmarks = pd.DataFrame(
+        {
+            "Mkt": factors["Mkt-Rf"] + factors["Rf"],
+            "Rf": factors["Rf"],
+        },
+        index=factors.index,
+    )
+
+    combined = pd.concat(
+        {
+            "assets": industries,
+            "factors": factors[["SMB", "HML", "Mkt-Rf"]],
+            "benchmarks": benchmarks,
+        },
+        axis=1,
+        join="inner",
+    )
+    combined.columns.names = ["group", "series"]
+
+    if return_form == "log":
+        combined = _to_log_returns(combined)
+    elif return_form != "simple":
+        raise ValueError("return_form must be 'simple' or 'log'.")
 
     if start_date:
-        df = df.loc[df.index >= pd.Timestamp(start_date)]
+        combined = combined.loc[combined.index >= pd.Timestamp(start_date)]
     if end_date:
-        df = df.loc[df.index < pd.Timestamp(end_date)]
+        combined = combined.loc[combined.index < pd.Timestamp(end_date)]
 
-    if not df.empty:
-        # Treat the benchmark as an equally weighted blend of the underlying
-        # industries. We insert it up front so downstream charts can display it
-        # alongside each constituent series.
-        benchmark = df.mean(axis=1)
-        df = df.copy()
-        df.insert(0, "Benchmark", benchmark)
-
-    return df
+    return combined
 
 
 def get_universe_start_date(universe: int, weighting: Weighting) -> date:
     """Return the earliest available date for a universe/weighting pair."""
-
-    df = _get_full_universe(universe, weighting)
+    df = get_universe_returns(universe, weighting=weighting, return_form="simple")
 
     if df.empty:
         raise ValueError("No data available for the requested universe.")
 
     return df.index.min().date()
-
-
-def clear_universe_cache() -> None:
-    """Expose cache clearing for testing or manual refreshes."""
-
-    _get_full_universe.cache_clear()

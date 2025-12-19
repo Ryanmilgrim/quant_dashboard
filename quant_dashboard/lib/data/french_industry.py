@@ -22,6 +22,7 @@ FRENCH_FTP_BASE = "https://mba.tuck.dartmouth.edu/pages/faculty/ken.french/ftp"
 SUPPORTED_INDUSTRY_UNIVERSES = (5, 10, 12, 17, 30, 38, 48, 49)
 
 _INDUSTRY_ZIP = {n: f"{n}_Industry_Portfolios_daily_CSV.zip" for n in SUPPORTED_INDUSTRY_UNIVERSES}
+_FACTORS_DAILY_ZIP = "F-F_Research_Data_Factors_daily_CSV.zip"
 
 _SECTION_MARKER: dict[Weighting, str] = {
     "value": "Average Value Weighted Returns -- Daily",
@@ -103,12 +104,60 @@ def _extract_sectioned_daily_table(csv_text: str, weighting: Weighting) -> str:
     return "\n".join(out_lines)
 
 
+def _extract_daily_factor_table(csv_text: str) -> str:
+    lines = csv_text.splitlines()
+    header_idx: Optional[int] = None
+
+    for i, raw in enumerate(lines):
+        if not raw.strip():
+            continue
+        fields = [
+            f.strip().lower().replace(" ", "").replace("-", "").replace("_", "")
+            for f in raw.split(",")
+        ]
+        if {"mktrf", "smb", "hml", "rf"}.issubset(fields):
+            header_idx = i
+            break
+
+    if header_idx is None:
+        raise ValueError("Could not find the daily factor header row in the Fama-French file.")
+
+    out_lines = [lines[header_idx].strip()]
+
+    for raw in lines[header_idx + 1 :]:
+        s = raw.strip()
+        if not s:
+            break
+        if len(s) < 8 or not s[:8].isdigit():
+            break
+        out_lines.append(s)
+
+    return "\n".join(out_lines)
+
+
 def _clean_percent_returns(df: pd.DataFrame) -> pd.DataFrame:
     out = df.copy()
     out.columns = [str(c).strip() for c in out.columns]
     out = out.apply(pd.to_numeric, errors="coerce")
     out = out.replace({code: np.nan for code in _MISSING_CODES})
     return out / 100.0
+
+
+def _normalize_factor_columns(df: pd.DataFrame) -> pd.DataFrame:
+    rename: dict[str, str] = {}
+
+    for col in df.columns:
+        key = str(col).strip().lower().replace(" ", "").replace("-", "").replace("_", "")
+        if key == "mktrf":
+            rename[col] = "Mkt-Rf"
+        elif key == "smb":
+            rename[col] = "SMB"
+        elif key == "hml":
+            rename[col] = "HML"
+        elif key == "rf":
+            rename[col] = "Rf"
+
+    return df.rename(columns=rename)
 
 
 def _to_log_returns(simple: pd.DataFrame) -> pd.DataFrame:
@@ -159,7 +208,50 @@ def fetch_ff_industry_daily(
     return df
 
 
+def fetch_ff_factors_daily(
+    *,
+    start_date: Optional[date] = None,
+    end_date: Optional[date] = None,
+    return_form: ReturnForm = "log",
+    refresh: bool = False,
+    cfg: FrenchDownloadConfig = FrenchDownloadConfig(),
+) -> pd.DataFrame:
+    """Fetch daily Fama-French factor returns (Mkt-Rf, SMB, HML, Rf)."""
+    url = f"{FRENCH_FTP_BASE}/{_FACTORS_DAILY_ZIP}"
+    zip_path = _download_with_cache(url, cfg.cache_dir / _FACTORS_DAILY_ZIP, cfg, refresh)
+
+    csv_text = _read_single_csv_from_zip(zip_path)
+    table_text = _extract_daily_factor_table(csv_text)
+
+    df = pd.read_csv(io.StringIO(table_text), index_col=0)
+    df.index = pd.to_datetime(df.index.astype(str), format="%Y%m%d", errors="coerce")
+    df.index.name = "Date"
+    df = df.loc[df.index.notna()].sort_index()
+    df = _clean_percent_returns(df)
+    df = _normalize_factor_columns(df)
+
+    required = {"Mkt-Rf", "SMB", "HML", "Rf"}
+    missing = required.difference(df.columns)
+    if missing:
+        raise ValueError(f"Missing expected factor columns: {sorted(missing)}")
+
+    df = df[["Mkt-Rf", "SMB", "HML", "Rf"]]
+
+    if start_date:
+        df = df.loc[df.index >= pd.Timestamp(start_date)]
+    if end_date:
+        df = df.loc[df.index < pd.Timestamp(end_date)]
+
+    if return_form == "log":
+        df = _to_log_returns(df)
+    elif return_form != "simple":
+        raise ValueError("return_form must be 'simple' or 'log'.")
+
+    return df
+
+
 __all__ = [
     "SUPPORTED_INDUSTRY_UNIVERSES",
     "fetch_ff_industry_daily",
+    "fetch_ff_factors_daily",
 ]
