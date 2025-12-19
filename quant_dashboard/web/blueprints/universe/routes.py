@@ -6,7 +6,11 @@ import pandas as pd
 from flask import Blueprint, flash, render_template, request
 
 from quant_dashboard.lib.data import SUPPORTED_INDUSTRY_UNIVERSES
-from quant_dashboard.lib.universe import get_universe_returns, get_universe_start_date
+from quant_dashboard.web.services.universe import (
+    UniverseServiceError,
+    get_cached_universe_returns,
+    get_cached_universe_start_date,
+)
 
 universe_bp = Blueprint("universe", __name__, url_prefix="/universe")
 
@@ -45,6 +49,28 @@ def _prepare_chart_payload(
     return {"series": series, "y_axis_title": y_axis_title}
 
 
+def _flatten_series_columns(df: pd.DataFrame) -> pd.DataFrame:
+    """Convert MultiIndex columns into user-friendly series names."""
+
+    def _format_column(col: object) -> str:
+        if isinstance(col, tuple):
+            parts = [str(part) for part in col if part not in (None, "")]
+            if not parts:
+                return ""
+            prefix, *rest = parts
+            return f"{prefix}: {' / '.join(rest)}" if rest else prefix
+
+        return str(col)
+
+    out = df.copy()
+    if isinstance(out.columns, pd.MultiIndex):
+        out.columns = [_format_column(col) for col in out.columns]
+    else:
+        out.columns = [str(col) for col in out.columns]
+
+    return out
+
+
 @universe_bp.route("/", methods=["GET", "POST"])
 @universe_bp.route("/historical", methods=["GET", "POST"])
 def investment_universe():
@@ -67,7 +93,7 @@ def investment_universe():
         if frequency not in {"daily", "monthly"}:
             raise ValueError("Unsupported frequency option")
 
-        earliest_start = get_universe_start_date(universe, weighting)
+        earliest_start = get_cached_universe_start_date(universe, weighting)
         earliest_start_display = earliest_start.strftime("%m/%d/%y")
 
         start_date_display = start_date_value or earliest_start_display
@@ -78,35 +104,39 @@ def investment_universe():
         if start_date > date.today():
             start_date = start_date.replace(year=start_date.year - 100)
 
-        df = get_universe_returns(universe, weighting=weighting, start_date=start_date)
+        df = get_cached_universe_returns(
+            universe, weighting=weighting, start_date=start_date
+        )
 
         if frequency == "monthly":
             df = df.resample("M").sum()
 
+        df = _flatten_series_columns(df)
+
         max_points = None if frequency == "daily" else 900
 
-        if df.empty:
-            flash("No data returned for the requested range.", "warning")
+        cumulative_log = df.cumsum()
+        price_index = np.exp(cumulative_log) * 100
+
+        if transform == "log":
+            log_growth = cumulative_log.sub(cumulative_log.iloc[0])
+            chart_data = _prepare_chart_payload(
+                log_growth,
+                rebase_to_100=False,
+                y_axis_title="Log price growth (relative to start)",
+                max_points=max_points,
+            )
         else:
-            cumulative_log = df.cumsum()
-            price_index = np.exp(cumulative_log) * 100
+            chart_data = _prepare_chart_payload(
+                price_index,
+                max_points=max_points,
+            )
 
-            if transform == "log":
-                log_growth = cumulative_log.sub(cumulative_log.iloc[0])
-                chart_data = _prepare_chart_payload(
-                    log_growth,
-                    rebase_to_100=False,
-                    y_axis_title="Log price growth (relative to start)",
-                    max_points=max_points,
-                )
-            else:
-                chart_data = _prepare_chart_payload(
-                    price_index,
-                    max_points=max_points,
-                )
-
-            if chart_data is not None:
-                chart_data["frequency"] = frequency
+        if chart_data is not None:
+            chart_data["frequency"] = frequency
+    except UniverseServiceError as exc:
+        if request.method == "POST":
+            flash(str(exc), exc.category)
     except ValueError:
         if request.method == "POST":
             flash("Please provide valid inputs.", "danger")
