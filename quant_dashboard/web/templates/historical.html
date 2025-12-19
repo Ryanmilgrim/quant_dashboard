@@ -62,9 +62,13 @@
     <script src="https://cdn.plot.ly/plotly-2.35.0.min.js" crossorigin="anonymous"></script>
     <script>
       const chartData = {{ chart_data | tojson }};
+      const orderedSeries = [
+        ...chartData.series.filter((series) => series.name !== 'Benchmark'),
+        ...chartData.series.filter((series) => series.name === 'Benchmark'),
+      ];
       let industryLegendShown = false;
 
-      const traces = chartData.series.map((series) => {
+      const traces = orderedSeries.map((series) => {
         const isBenchmark = series.name === 'Benchmark';
         const isIndustry = !isBenchmark;
         const showIndustryLegend = isIndustry && !industryLegendShown;
@@ -81,6 +85,7 @@
           name: traceName,
           x: series.x,
           y: series.y,
+          opacity: isBenchmark ? 1 : 0.55,
           line: {
             color: isBenchmark ? '#dc2626' : '#9ca3af',
             width: 2,
@@ -96,12 +101,14 @@
         };
       });
 
+      const showRangeBreaks = chartData.frequency === 'daily';
       const layout = {
         margin: { t: 40, r: 20, b: 60, l: 60 },
         xaxis: {
           title: 'Date',
           tickformat: '%m/%d/%y',
           automargin: true,
+          rangebreaks: showRangeBreaks ? [{ bounds: ['sat', 'mon'] }] : [],
         },
         yaxis: {
           title: chartData.y_axis_title || 'Benchmark index level',

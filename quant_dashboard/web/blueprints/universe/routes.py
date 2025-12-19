@@ -48,17 +48,6 @@ def _prepare_chart_payload(
     return {"series": series, "y_axis_title": y_axis_title}
 
 
-def _build_equal_weight_benchmark(log_returns: pd.DataFrame) -> pd.Series:
-    if log_returns.empty:
-        return pd.Series(dtype=float, index=log_returns.index, name="Benchmark")
-
-    simple = np.expm1(log_returns)
-    benchmark_simple = simple.mean(axis=1)
-    benchmark_log = np.log1p(benchmark_simple)
-    benchmark_log.name = "Benchmark"
-    return benchmark_log
-
-
 @universe_bp.route("/", methods=["GET", "POST"])
 @universe_bp.route("/historical", methods=["GET", "POST"])
 def investment_universe():
@@ -95,8 +84,8 @@ def investment_universe():
         df = get_universe_returns_cached(universe, weighting=weighting, start_date=start_date)
         asset_returns = df["assets"] if not df.empty else df
 
-        if not asset_returns.empty:
-            benchmark = _build_equal_weight_benchmark(asset_returns)
+        if not df.empty:
+            benchmark = df["benchmarks"]["Mkt"].rename("Benchmark")
             asset_returns = asset_returns.copy()
             asset_returns.insert(0, "Benchmark", benchmark)
 
