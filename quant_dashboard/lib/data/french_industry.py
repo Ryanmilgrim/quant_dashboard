@@ -17,14 +17,28 @@ from quant_dashboard.lib.timeseries.returns import to_log_returns
 Weighting = Literal["value", "equal"]
 JoinHow = Literal["inner", "outer"]
 ReturnForm = Literal["simple", "log"]
+FactorSet = Literal["ff3", "ff5", "ff3_mom", "ff5_mom"]
 
 FRENCH_FTP_BASE = "https://mba.tuck.dartmouth.edu/pages/faculty/ken.french/ftp"
 
 # Industry universes offered by the Data Library (daily versions exist for these)
 SUPPORTED_INDUSTRY_UNIVERSES = (5, 10, 12, 17, 30, 38, 48, 49)
+SUPPORTED_FACTOR_SETS = ("ff3", "ff5", "ff3_mom", "ff5_mom")
 
 _INDUSTRY_ZIP = {n: f"{n}_Industry_Portfolios_daily_CSV.zip" for n in SUPPORTED_INDUSTRY_UNIVERSES}
 _FACTORS_DAILY_ZIP = "F-F_Research_Data_Factors_daily_CSV.zip"
+_FACTORS_5_DAILY_ZIP = "F-F_Research_Data_5_Factors_2x3_daily_CSV.zip"
+_MOMENTUM_DAILY_ZIP = "F-F_Momentum_Factor_daily_CSV.zip"
+
+_BASE_FACTOR_ZIPS = {
+    "ff3": _FACTORS_DAILY_ZIP,
+    "ff5": _FACTORS_5_DAILY_ZIP,
+}
+
+_BASE_FACTOR_COLUMNS = {
+    "ff3": ("Mkt-Rf", "SMB", "HML", "Rf"),
+    "ff5": ("Mkt-Rf", "SMB", "HML", "RMW", "CMA", "Rf"),
+}
 
 _SECTION_MARKER: dict[Weighting, str] = {
     "value": "Average Value Weighted Returns -- Daily",
@@ -78,6 +92,13 @@ def _read_single_csv_from_zip(zip_path: Path) -> str:
         return zf.read(csv_name).decode("utf-8", errors="ignore")
 
 
+def _normalize_factor_key(value: str) -> str:
+    key = str(value).strip().lower().replace(" ", "").replace("-", "").replace("_", "")
+    if key == "umd":
+        return "mom"
+    return key
+
+
 def _extract_sectioned_daily_table(csv_text: str, weighting: Weighting) -> str:
     lines = csv_text.splitlines()
     marker = _SECTION_MARKER[weighting]
@@ -106,18 +127,15 @@ def _extract_sectioned_daily_table(csv_text: str, weighting: Weighting) -> str:
     return "\n".join(out_lines)
 
 
-def _extract_daily_factor_table(csv_text: str) -> str:
+def _extract_daily_factor_table(csv_text: str, required_keys: set[str]) -> str:
     lines = csv_text.splitlines()
     header_idx: Optional[int] = None
 
     for i, raw in enumerate(lines):
         if not raw.strip():
             continue
-        fields = [
-            f.strip().lower().replace(" ", "").replace("-", "").replace("_", "")
-            for f in raw.split(",")
-        ]
-        if {"mktrf", "smb", "hml", "rf"}.issubset(fields):
+        fields = [_normalize_factor_key(f) for f in raw.split(",")]
+        if required_keys.issubset(fields):
             header_idx = i
             break
 
@@ -149,13 +167,19 @@ def _normalize_factor_columns(df: pd.DataFrame) -> pd.DataFrame:
     rename: dict[str, str] = {}
 
     for col in df.columns:
-        key = str(col).strip().lower().replace(" ", "").replace("-", "").replace("_", "")
+        key = _normalize_factor_key(col)
         if key == "mktrf":
             rename[col] = "Mkt-Rf"
         elif key == "smb":
             rename[col] = "SMB"
         elif key == "hml":
             rename[col] = "HML"
+        elif key == "rmw":
+            rename[col] = "RMW"
+        elif key == "cma":
+            rename[col] = "CMA"
+        elif key == "mom":
+            rename[col] = "Mom"
         elif key == "rf":
             rename[col] = "Rf"
 
@@ -204,18 +228,37 @@ def fetch_ff_industry_daily(
 
 def fetch_ff_factors_daily(
     *,
+    factor_set: FactorSet = "ff3",
     start_date: Optional[date] = None,
     end_date: Optional[date] = None,
     return_form: ReturnForm = "log",
     refresh: bool = False,
     cfg: FrenchDownloadConfig = FrenchDownloadConfig(),
 ) -> pd.DataFrame:
-    """Fetch daily Fama-French factor returns (Mkt-Rf, SMB, HML, Rf)."""
-    url = f"{FRENCH_FTP_BASE}/{_FACTORS_DAILY_ZIP}"
-    zip_path = _download_with_cache(url, cfg.cache_dir / _FACTORS_DAILY_ZIP, cfg, refresh)
+    """Fetch daily Fama-French factor returns for the requested factor set.
+
+    Supported factor sets:
+    - ff3: Mkt-Rf, SMB, HML, Rf
+    - ff5: Mkt-Rf, SMB, HML, RMW, CMA, Rf
+    - ff3_mom / ff5_mom: add momentum (Mom) from the separate momentum file
+    """
+    if factor_set not in SUPPORTED_FACTOR_SETS:
+        raise ValueError(f"Unsupported factor_set {factor_set!r}. Supported: {SUPPORTED_FACTOR_SETS}")
+
+    include_mom = factor_set.endswith("_mom")
+    base_set = factor_set.replace("_mom", "")
+    base_zip = _BASE_FACTOR_ZIPS.get(base_set)
+    base_cols = _BASE_FACTOR_COLUMNS.get(base_set)
+
+    if base_zip is None or base_cols is None:
+        raise ValueError(f"Unsupported factor_set {factor_set!r}. Supported: {SUPPORTED_FACTOR_SETS}")
+
+    base_required = {_normalize_factor_key(c) for c in base_cols}
+    url = f"{FRENCH_FTP_BASE}/{base_zip}"
+    zip_path = _download_with_cache(url, cfg.cache_dir / base_zip, cfg, refresh)
 
     csv_text = _read_single_csv_from_zip(zip_path)
-    table_text = _extract_daily_factor_table(csv_text)
+    table_text = _extract_daily_factor_table(csv_text, base_required)
 
     df = pd.read_csv(io.StringIO(table_text), index_col=0)
     df.index = pd.to_datetime(df.index.astype(str), format="%Y%m%d", errors="coerce")
@@ -224,12 +267,32 @@ def fetch_ff_factors_daily(
     df = _clean_percent_returns(df)
     df = _normalize_factor_columns(df)
 
-    required = {"Mkt-Rf", "SMB", "HML", "Rf"}
+    required = set(base_cols)
     missing = required.difference(df.columns)
     if missing:
         raise ValueError(f"Missing expected factor columns: {sorted(missing)}")
 
-    df = df[["Mkt-Rf", "SMB", "HML", "Rf"]]
+    df = df[list(base_cols)]
+
+    if include_mom:
+        mom_required = {_normalize_factor_key("Mom")}
+        mom_url = f"{FRENCH_FTP_BASE}/{_MOMENTUM_DAILY_ZIP}"
+        mom_zip = _download_with_cache(mom_url, cfg.cache_dir / _MOMENTUM_DAILY_ZIP, cfg, refresh)
+        mom_csv = _read_single_csv_from_zip(mom_zip)
+        mom_table = _extract_daily_factor_table(mom_csv, mom_required)
+        mom_df = pd.read_csv(io.StringIO(mom_table), index_col=0)
+        mom_df.index = pd.to_datetime(mom_df.index.astype(str), format="%Y%m%d", errors="coerce")
+        mom_df.index.name = "Date"
+        mom_df = mom_df.loc[mom_df.index.notna()].sort_index()
+        mom_df = _clean_percent_returns(mom_df)
+        mom_df = _normalize_factor_columns(mom_df)
+
+        if "Mom" not in mom_df.columns:
+            raise ValueError("Missing expected factor column: Mom")
+
+        mom_df = mom_df[["Mom"]]
+        df = df.join(mom_df, how="inner")
+        df = df[list(base_cols[:-1]) + ["Mom"] + [base_cols[-1]]]
 
     if start_date:
         df = df.loc[df.index >= pd.Timestamp(start_date)]
@@ -246,6 +309,8 @@ def fetch_ff_factors_daily(
 
 __all__ = [
     "SUPPORTED_INDUSTRY_UNIVERSES",
+    "SUPPORTED_FACTOR_SETS",
+    "FactorSet",
     "fetch_ff_industry_daily",
     "fetch_ff_factors_daily",
 ]

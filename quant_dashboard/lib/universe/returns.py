@@ -6,6 +6,7 @@ from typing import Optional
 import pandas as pd
 
 from quant_dashboard.lib.data.french_industry import (
+    FactorSet,
     ReturnForm,
     Weighting,
     fetch_ff_factors_daily,
@@ -18,6 +19,7 @@ def get_universe_returns(
     universe: int,
     *,
     weighting: Weighting = "value",
+    factor_set: FactorSet = "ff3",
     return_form: ReturnForm = "log",
     start_date: Optional[date] = None,
     end_date: Optional[date] = None,
@@ -26,7 +28,7 @@ def get_universe_returns(
 
     The result has MultiIndex columns with top-level groups:
     - "assets": industry portfolio returns for the selected universe
-    - "factors": SMB, HML, and Mkt-Rf
+    - "factors": the selected factor set (minus Rf)
     - "benchmarks": Mkt (Mkt-Rf + Rf) and Rf
 
     Returns are expressed in decimal form. If ``return_form`` is "log", Mkt is
@@ -43,6 +45,7 @@ def get_universe_returns(
         end_date=end_date,
     )
     factors = fetch_ff_factors_daily(
+        factor_set=factor_set,
         return_form="simple",
         start_date=start_date,
         end_date=end_date,
@@ -59,7 +62,7 @@ def get_universe_returns(
     combined = pd.concat(
         {
             "assets": industries,
-            "factors": factors[["SMB", "HML", "Mkt-Rf"]],
+            "factors": factors[[col for col in factors.columns if col != "Rf"]],
             "benchmarks": benchmarks,
         },
         axis=1,
@@ -80,9 +83,19 @@ def get_universe_returns(
     return combined
 
 
-def get_universe_start_date(universe: int, weighting: Weighting) -> date:
-    """Return the earliest available date for a universe/weighting pair."""
-    df = get_universe_returns(universe, weighting=weighting, return_form="simple")
+def get_universe_start_date(
+    universe: int,
+    weighting: Weighting,
+    *,
+    factor_set: FactorSet = "ff3",
+) -> date:
+    """Return the earliest available date for a universe/weighting/factor set."""
+    df = get_universe_returns(
+        universe,
+        weighting=weighting,
+        factor_set=factor_set,
+        return_form="simple",
+    )
 
     if df.empty:
         raise ValueError("No data available for the requested universe.")

@@ -1,4 +1,4 @@
-from datetime import date, datetime
+from datetime import date
 from typing import Optional
 
 import numpy as np
@@ -57,7 +57,10 @@ def investment_universe():
     weighting = "value"
     transform = request.form.get("transform", "index")
     frequency = request.form.get("frequency", "monthly")
-    start_date_value = request.form.get("start_date")
+    start_year_value = request.form.get("start_year")
+    current_year = date.today().year
+    earliest_start_year: Optional[int] = None
+    start_year_display: Optional[str] = start_year_value
 
     try:
         universe = int(selected_universe)
@@ -71,15 +74,20 @@ def investment_universe():
             raise ValueError("Unsupported frequency option")
 
         earliest_start = get_universe_start_date_cached(universe, weighting)
-        earliest_start_display = earliest_start.strftime("%m/%d/%y")
+        earliest_start_year = earliest_start.year
 
-        start_date_display = start_date_value or earliest_start_display
-        start_date = datetime.strptime(start_date_display, "%m/%d/%y").date()
+        if not start_year_display:
+            start_year_display = str(earliest_start_year)
 
-        # Two-digit years default to 2000-2068/1900-1999; adjust older history to keep
-        # early Fama-French periods intact when defaulting to the 1930s.
-        if start_date > date.today():
-            start_date = start_date.replace(year=start_date.year - 100)
+        try:
+            start_year = int(start_year_display)
+        except ValueError as exc:
+            raise ValueError("Invalid start year") from exc
+
+        if start_year < earliest_start_year or start_year > current_year:
+            raise ValueError("Start year out of range")
+
+        start_date = date(start_year, 1, 1)
 
         df = get_universe_returns_cached(universe, weighting=weighting, start_date=start_date)
         asset_returns = df["assets"] if not df.empty else df
@@ -130,5 +138,7 @@ def investment_universe():
         selected_universe=selected_universe,
         transform=transform,
         frequency=frequency,
-        start_date_value=start_date_display if "start_date_display" in locals() else None,
+        start_year_value=start_year_display,
+        earliest_start_year=earliest_start_year or current_year,
+        current_year=current_year,
     )
