@@ -84,6 +84,14 @@ If the web app is affected:
   - a short library docstring/reference
   - a small demo route/page (optional but nice)
 
+## Web UI style guide (demo app)
+- Maintain the report-style theme in `quant_dashboard/web/static/styles.css` (navy/teal/gray palette, Oswald headings, Source Sans 3 body, Merriweather callouts).
+- Use the section header pattern with `.section-header`, `.section-number`, `.section-title`, and `.section-rule`.
+- Keep layouts on the 12-column grid (`.report-grid`, `.span-*`) and use existing card patterns (`.card`, `.report-card`, `.panel-navy`, `.bubble-callout`).
+- For charts, keep restrained styling (thin gridlines, minimal clutter); benchmark line in teal (`#2c9bac`), industries in navy (`#001f38`), no x-axis title.
+- Preserve the persistent disclaimer text in both banner and footer, and do not reference BNY anywhere:
+  - "This personal site was created by Ryan Milgrim, CFA for recreation and is not intended as client advice. For educational/demo purposes only."
+
 ## Non-goals / disclaimers
 - Do not present outputs as financial advice.
 - Prefer educational framing and reproducible calculations.
