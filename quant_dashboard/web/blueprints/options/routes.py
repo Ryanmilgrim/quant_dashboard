@@ -2,7 +2,7 @@ from typing import Optional
 
 from flask import Blueprint, flash, render_template, request
 
-from quant_dashboard.lib.pricing import black_scholes_price
+from quant_dashboard.lib.analysis import black_scholes_price
 
 options_bp = Blueprint("options", __name__, url_prefix="/options")
 

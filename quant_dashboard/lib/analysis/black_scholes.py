@@ -1,8 +1,8 @@
 from math import erf, exp, log, sqrt
 
+
 def _norm_cdf(x: float) -> float:
     """Cumulative distribution function for a standard normal variable."""
-
     return 0.5 * (1 + erf(x / sqrt(2)))
 
 
@@ -16,7 +16,6 @@ def black_scholes_price(
     option_type: str = "call",
 ) -> float:
     """Compute the Black-Scholes price for a European option."""
-
     if spot <= 0 or strike <= 0 or time_to_expiry <= 0 or volatility <= 0:
         raise ValueError("Inputs must be positive")
 

@@ -12,7 +12,7 @@ from quant_dashboard.lib.data.french_industry import (
     fetch_ff_factors_daily,
     fetch_ff_industry_daily,
 )
-from quant_dashboard.lib.timeseries.returns import to_log_returns
+from quant_dashboard.lib.returns import to_log_returns
 
 
 def get_universe_returns(
