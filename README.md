@@ -60,6 +60,12 @@ log_returns = to_log_returns(simple)
 ### Style analysis (Fama-French universe data)
 
 ```python
+from quant_dashboard.lib.style_analysis import StyleAnalysis
+from quant_dashboard.lib.universe import get_universe_returns
+run = StyleAnalysis(get_universe_returns(10), benchmark_name="Mkt", rf_name="Rf").run(); print(run.summary())
+```
+
+```python
 from datetime import date
 
 from quant_dashboard.lib.style_analysis import StyleAnalysis
