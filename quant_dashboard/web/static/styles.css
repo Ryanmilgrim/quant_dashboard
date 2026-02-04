@@ -236,6 +236,10 @@ a:hover {
   grid-column: span 5;
 }
 
+.span-12 {
+  grid-column: span 12;
+}
+
 .card,
 .app-form,
 .result-card {

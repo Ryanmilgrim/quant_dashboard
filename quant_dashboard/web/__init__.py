@@ -8,11 +8,13 @@ def create_app() -> Flask:
 
     from .blueprints.core.routes import core_bp
     from .blueprints.options.routes import options_bp
+    from .blueprints.style.routes import style_bp
     from .blueprints.universe.routes import universe_bp
 
     app.register_blueprint(core_bp)
     app.register_blueprint(universe_bp)
     app.register_blueprint(options_bp)
+    app.register_blueprint(style_bp)
 
     return app
 

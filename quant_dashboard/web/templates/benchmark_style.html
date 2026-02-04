@@ -1,0 +1,342 @@
+{% extends 'base.html' %}
+
+{% block content %}
+  <section class="section-header">
+    <span class="section-number">04</span>
+    <div class="section-text">
+      <p class="section-kicker">Style lab</p>
+      <h2 class="section-title">Benchmark Style Tracking</h2>
+      <p class="section-lede">Fit a long-only industry mix that tracks the benchmark with rolling optimization.</p>
+      <p class="section-note">The tracking portfolio is investable; alpha is diagnostic only. Long-only weights sum to 100%.</p>
+    </div>
+    <div class="section-rule"></div>
+  </section>
+
+  <section class="report-grid report-grid--spaced">
+    <div class="span-7">
+      <form method="post" class="row g-3 app-form">
+        <div class="col-12 col-md-6 col-lg-4">
+          <label class="form-label" for="universe">Industry Universe</label>
+          <select class="form-select" id="universe" name="universe">
+            {% for u in universes %}
+              <option value="{{ u }}" {% if u|string == selected_universe %}selected{% endif %}>{{ u }} Industries</option>
+            {% endfor %}
+          </select>
+          <p class="form-text">Choose the industry granularity.</p>
+        </div>
+        <div class="col-12 col-md-6 col-lg-4">
+          <label class="form-label" for="start_year">Start Year</label>
+          <input class="form-control" id="start_year" name="start_year" type="number" inputmode="numeric" pattern="\d{4}" min="{{ earliest_start_year }}" max="{{ current_year }}" step="1" placeholder="YYYY" value="{{ start_year_value }}">
+          <p class="form-text">Defaults to the last decade of available data.</p>
+        </div>
+        <div class="col-12 col-md-6 col-lg-4">
+          <label class="form-label" for="style_window">Rolling Window (days)</label>
+          <input class="form-control" id="style_window" name="style_window" type="number" min="2" step="1" placeholder="252" value="{{ style_window_value }}">
+          <p class="form-text">252 trading days is about one year of daily history.</p>
+        </div>
+        <div class="col-12 col-md-6">
+          <label class="form-label" for="objective">Objective</label>
+          <select class="form-select" id="objective" name="objective">
+            <option value="auto" {% if objective == 'auto' %}selected{% endif %}>Auto (choose SOS or MAD)</option>
+            <option value="sum of squares" {% if objective == 'sum of squares' %}selected{% endif %}>Sum of squares (least squares)</option>
+            <option value="mean absolute deviation" {% if objective == 'mean absolute deviation' %}selected{% endif %}>Mean absolute deviation</option>
+          </select>
+          <p class="form-text">L1 objective is more robust to outliers.</p>
+        </div>
+        <div class="col-12 col-md-6">
+          <label class="form-label" for="rebalance">Rebalance Frequency</label>
+          <select class="form-select" id="rebalance" name="rebalance">
+            <option value="daily" {% if rebalance == 'daily' %}selected{% endif %}>Daily</option>
+            <option value="weekly" {% if rebalance == 'weekly' %}selected{% endif %}>Weekly</option>
+            <option value="monthly" {% if rebalance == 'monthly' %}selected{% endif %}>Monthly</option>
+          </select>
+          <p class="form-text">Monthly rebalances keep compute light.</p>
+        </div>
+        <div class="col-12 d-flex flex-column flex-sm-row gap-2 align-items-start align-items-sm-center">
+          <button class="btn btn-primary" type="submit">Run style analysis</button>
+          <p class="text-muted small mb-0">The simulated portfolio is long-only and sums to 100%.</p>
+        </div>
+      </form>
+    </div>
+    <div class="span-5">
+      <div class="card report-card">
+        <div class="card-body">
+          <p class="card-kicker">Summary</p>
+          <h5 class="card-title">Rolling tracking fit</h5>
+          {% if metrics %}
+            <table class="table table-sm mb-0">
+              <tbody>
+                <tr>
+                  <th scope="row">Window</th>
+                  <td>{{ metrics.window }} days</td>
+                </tr>
+                <tr>
+                  <th scope="row">Objective</th>
+                  <td>{{ metrics.objective }}</td>
+                </tr>
+                <tr>
+                  <th scope="row">Rebalance</th>
+                  <td>{{ metrics.rebalance }}</td>
+                </tr>
+                <tr>
+                  <th scope="row">Assets</th>
+                  <td>{{ metrics.assets }}</td>
+                </tr>
+                <tr>
+                  <th scope="row">Rebalance range</th>
+                  <td>
+                    {% if metrics.rebalance_start and metrics.rebalance_end %}
+                      {{ metrics.rebalance_start }} &rarr; {{ metrics.rebalance_end }}
+                    {% else %}
+                      Not available
+                    {% endif %}
+                  </td>
+                </tr>
+                <tr>
+                  <th scope="row">Tracking residual (mean)</th>
+                  <td>
+                    {% if metrics.tracking_error_mean is not none %}
+                      {{ '%.2f' | format(metrics.tracking_error_mean) }} bps
+                    {% else %}
+                      Not available
+                    {% endif %}
+                  </td>
+                </tr>
+                <tr>
+                  <th scope="row">Tracking residual (daily vol)</th>
+                  <td>
+                    {% if metrics.tracking_error_vol is not none %}
+                      {{ '%.2f' | format(metrics.tracking_error_vol) }} bps
+                    {% else %}
+                      Not available
+                    {% endif %}
+                  </td>
+                </tr>
+                <tr>
+                  <th scope="row">Tracking residual (annualized vol)</th>
+                  <td>
+                    {% if metrics.tracking_error_vol_annual is not none %}
+                      {{ '%.2f' | format(metrics.tracking_error_vol_annual) }} bps
+                    {% else %}
+                      Not available
+                    {% endif %}
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          {% else %}
+            <p class="text-muted">Run the analysis to see summary metrics.</p>
+          {% endif %}
+        </div>
+      </div>
+    </div>
+  </section>
+
+  {% if chart_growth or chart_tracking or (weights_payload and weights_payload.labels) %}
+    <section class="report-grid report-grid--spaced">
+      {% if chart_growth %}
+        <div class="span-12">
+          <div class="card chart-panel">
+            <div class="card-body p-4 p-lg-5">
+              <h5 class="card-title">Simulated portfolio vs market benchmark</h5>
+              <p class="card-subtitle text-muted small mb-3">Simulated performance from the rolling style weights compared with the market benchmark.</p>
+              <div id="growthChart" class="chart-container"></div>
+            </div>
+          </div>
+        </div>
+      {% endif %}
+      {% if chart_tracking %}
+        <div class="span-12">
+          <div class="card chart-panel">
+            <div class="card-body p-4 p-lg-5">
+              <h5 class="card-title">Tracking residual (portfolio &minus; benchmark)</h5>
+              <p class="card-subtitle text-muted small mb-3">Daily residuals in basis points; positive values indicate outperformance.</p>
+              <div id="trackingChart" class="chart-container"></div>
+            </div>
+          </div>
+        </div>
+      {% endif %}
+      {% if weights_payload and weights_payload.labels %}
+        <div class="span-12">
+          <div class="card chart-panel">
+            <div class="card-body p-4 p-lg-5">
+              <h5 class="card-title">Latest style weights (100% total)</h5>
+              <p class="card-subtitle text-muted small mb-3">Top exposures at the most recent rebalance date.</p>
+              <div id="weightsChart" class="chart-container"></div>
+            </div>
+          </div>
+        </div>
+      {% endif %}
+    </section>
+  {% endif %}
+
+  {% if weights_payload and weights_payload.labels %}
+    <section class="report-grid">
+      <div class="span-12">
+        <div class="card report-card">
+          <div class="card-body">
+            <p class="card-kicker">Top weights</p>
+            <h5 class="card-title">Holdings mix</h5>
+            <table class="table table-sm mb-0">
+              <tbody>
+                {% for row in weights_table %}
+                  <tr>
+                    <th scope="row">{{ row.name }}</th>
+                    <td>{{ '%.2f' | format(row.weight * 100) }}%</td>
+                  </tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </section>
+  {% else %}
+    <p class="text-muted">No weights available for the requested configuration.</p>
+  {% endif %}
+
+  {% if chart_growth or chart_tracking or weights_payload %}
+    <script src="https://cdn.plot.ly/plotly-2.35.0.min.js" crossorigin="anonymous"></script>
+    <script>
+      const growthChart = {{ chart_growth | tojson }};
+      const trackingChart = {{ chart_tracking | tojson }};
+      const weightsChart = {{ weights_payload | tojson }};
+
+      const baseLayout = {
+        margin: { t: 40, r: 20, b: 60, l: 60 },
+        font: {
+          family: 'Source Sans 3, Segoe UI, Tahoma, sans-serif',
+          color: '#001f38',
+        },
+        paper_bgcolor: 'rgba(0, 0, 0, 0)',
+        plot_bgcolor: '#ffffff',
+        xaxis: {
+          tickformat: '%m/%d/%y',
+          automargin: true,
+          showline: true,
+          linecolor: '#d8dadb',
+          linewidth: 1,
+          gridcolor: 'rgba(216, 218, 219, 0.4)',
+          tickfont: { color: '#667d89' },
+          titlefont: { color: '#001f38' },
+          zeroline: false,
+          title: '',
+        },
+        yaxis: {
+          automargin: true,
+          showline: true,
+          linecolor: '#d8dadb',
+          linewidth: 1,
+          gridcolor: 'rgba(216, 218, 219, 0.4)',
+          tickfont: { color: '#667d89' },
+          titlefont: { color: '#001f38' },
+          zeroline: false,
+        },
+        legend: {
+          orientation: 'h',
+          y: 1.08,
+          x: 1,
+          xanchor: 'right',
+          title: { text: '' },
+          font: { color: '#667d89' },
+        },
+        showlegend: true,
+        hovermode: 'closest',
+        hoverlabel: {
+          bgcolor: '#ffffff',
+          bordercolor: '#d8dadb',
+          font: { color: '#001f38' },
+        },
+      };
+
+      if (growthChart && growthChart.series && growthChart.series.length) {
+        const traces = growthChart.series.map((series) => {
+          const isBenchmark = series.name === 'Market Benchmark';
+          return {
+            type: 'scatter',
+            mode: 'lines',
+            name: series.name,
+            x: series.x,
+            y: series.y,
+            line: {
+              color: isBenchmark ? '#2c9bac' : '#001f38',
+              width: isBenchmark ? 2.5 : 2,
+            },
+            hoverinfo: 'name+x+y',
+            hovertemplate: '<b>%{fullData.name}</b><br>%{x|%m/%d/%y}<br>%{y:,.2f}<extra></extra>',
+          };
+        });
+
+        const layout = {
+          ...baseLayout,
+          yaxis: {
+            ...baseLayout.yaxis,
+            title: growthChart.y_axis_title || 'Indexed growth',
+          },
+        };
+
+        const container = document.getElementById('growthChart');
+        Plotly.purge(container);
+        Plotly.newPlot(container, traces, layout, { displaylogo: false, responsive: true });
+      }
+
+      if (trackingChart && trackingChart.series && trackingChart.series.length) {
+        const series = trackingChart.series[0];
+        const traces = [
+          {
+            type: 'scatter',
+            mode: 'lines',
+            name: series.name,
+            x: series.x,
+            y: series.y,
+            line: { color: '#001f38', width: 1.8 },
+            hoverinfo: 'name+x+y',
+            hovertemplate: '<b>Tracking residual</b><br>%{x|%m/%d/%y}<br>%{y:.2f} bps<extra></extra>',
+          },
+        ];
+
+        const layout = {
+          ...baseLayout,
+          yaxis: {
+            ...baseLayout.yaxis,
+            title: trackingChart.y_axis_title || 'Tracking residual (bps)',
+            tickformat: '.2f',
+          },
+        };
+
+        const container = document.getElementById('trackingChart');
+        Plotly.purge(container);
+        Plotly.newPlot(container, traces, layout, { displaylogo: false, responsive: true });
+      }
+
+      if (weightsChart && weightsChart.labels && weightsChart.labels.length) {
+        const traces = [
+          {
+            type: 'bar',
+            x: weightsChart.labels,
+            y: weightsChart.values,
+            marker: { color: '#2c9bac' },
+            hovertemplate: '<b>%{x}</b><br>%{y:.2f}%<extra></extra>',
+          },
+        ];
+
+        const layout = {
+          ...baseLayout,
+          xaxis: {
+            ...baseLayout.xaxis,
+            tickangle: -30,
+          },
+          yaxis: {
+            ...baseLayout.yaxis,
+            title: 'Weight (%)',
+            tickformat: '.1f',
+          },
+        };
+
+        const container = document.getElementById('weightsChart');
+        Plotly.purge(container);
+        Plotly.newPlot(container, traces, layout, { displaylogo: false, responsive: true });
+      }
+    </script>
+  {% endif %}
+{% endblock %}

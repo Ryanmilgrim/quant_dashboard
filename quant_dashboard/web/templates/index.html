@@ -22,6 +22,7 @@
           <p>Define the asset universe that anchors your benchmark, then measure every strategy against that baseline.</p>
           <div class="hero-actions">
             <a class="btn btn-primary" href="{{ url_for('universe.investment_universe') }}">Investment Universe</a>
+            <a class="btn btn-outline-secondary" href="{{ url_for('style.benchmark_style') }}">Benchmark Style</a>
             <a class="btn btn-outline-secondary" href="{{ url_for('options.black_scholes_view') }}">Black-Scholes Pricing</a>
           </div>
         </div>
@@ -79,6 +80,16 @@
           <h5 class="card-title">Option Pricing</h5>
           <p class="card-text">Evaluate European calls and puts with the Black-Scholes model.</p>
           <a class="text-link" href="{{ url_for('options.black_scholes_view') }}">Launch pricing worksheet</a>
+        </div>
+      </div>
+    </div>
+    <div class="span-6">
+      <div class="card report-card">
+        <div class="card-body">
+          <p class="card-kicker">Style lab</p>
+          <h5 class="card-title">Benchmark Style Tracking</h5>
+          <p class="card-text">Fit a long-only style mix that tracks the benchmark over rolling windows.</p>
+          <a class="text-link" href="{{ url_for('style.benchmark_style') }}">Open style tracker</a>
         </div>
       </div>
     </div>
