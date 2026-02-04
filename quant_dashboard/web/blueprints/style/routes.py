@@ -17,6 +17,31 @@ from quant_dashboard.web.services.universe_cache import (
 style_bp = Blueprint("style", __name__, url_prefix="/style")
 
 
+def _opt_int(value: Optional[str]) -> Optional[int]:
+    if value is None:
+        return None
+    s = str(value).strip()
+    if s == "" or s.lower() in ("none", "null", "auto"):
+        return None
+    return int(s)
+
+
+def _top_weights(weights: pd.Series, *, top_n: int = 10) -> pd.Series:
+    if weights is None or weights.empty:
+        return pd.Series(dtype=float)
+    w = weights.astype(float).clip(lower=0.0)
+    s = float(w.sum())
+    if s <= 0:
+        return pd.Series(dtype=float)
+    w = w / s
+    ranked = w.sort_values(ascending=False)
+    top = ranked.head(top_n).copy()
+    other = float(ranked.iloc[top_n:].sum())
+    if other > 0:
+        top.loc["Other"] = other
+    return top[top > 0]
+
+
 def _prepare_line_chart_payload(
     df: pd.DataFrame,
     *,
@@ -41,22 +66,6 @@ def _prepare_line_chart_payload(
     return {"series": series, "y_axis_title": y_axis_title}
 
 
-def _prepare_weights_payload(weights: pd.Series, *, top_n: int = 10) -> dict[str, object]:
-    if weights.empty:
-        return {"labels": [], "values": []}
-
-    ranked = weights.sort_values(ascending=False)
-    top = ranked.head(top_n)
-    if len(ranked) > top_n:
-        remainder = max(0.0, float(1.0 - top.sum()))
-        if remainder > 0:
-            top = pd.concat([top, pd.Series({"Other": remainder})])
-
-    labels = [str(idx) for idx in top.index]
-    values = (top.values * 100).round(2).tolist()
-    return {"labels": labels, "values": values}
-
-
 @style_bp.route("/benchmark-style", methods=["GET", "POST"])
 def benchmark_style():
     chart_growth: Optional[dict[str, object]] = None
@@ -65,11 +74,12 @@ def benchmark_style():
     weights_table: list[dict[str, object]] = []
     metrics: Optional[dict[str, object]] = None
 
-    selected_universe = request.form.get("universe") or "10"
-    style_window_value = request.form.get("style_window") or "252"
-    objective = request.form.get("objective") or "auto"
-    rebalance = request.form.get("rebalance") or "monthly"
-    start_year_value = request.form.get("start_year")
+    params = request.values
+    selected_universe = (params.get("universe") or "10").strip()
+    style_window_value = (params.get("style_window") or "").strip()
+    objective = (params.get("objective") or "auto").strip()
+    rebalance = (params.get("rebalance") or "monthly").strip()
+    start_year_value = (params.get("start_year") or "").strip()
 
     weighting = "value"
     current_year = date.today().year
@@ -129,7 +139,7 @@ def benchmark_style():
                 current_year=current_year,
             )
 
-        style_window = int(style_window_value) if style_window_value else None
+        style_window = _opt_int(style_window_value)
         if style_window is not None and style_window <= 1:
             raise ValueError("style_window must be greater than 1.")
 
@@ -144,19 +154,30 @@ def benchmark_style():
         if weights.empty:
             flash("No feasible weights found for the requested configuration.", "warning")
         else:
-            latest_weights = weights.iloc[-1]
-            latest_weights = latest_weights.clip(lower=0)
-            total_weight = float(latest_weights.sum())
-            if total_weight > 0:
-                latest_weights = latest_weights / total_weight
-            weights_payload = _prepare_weights_payload(latest_weights)
-            ranked = latest_weights.sort_values(ascending=False)
-            top_n = 10
-            top = ranked.head(top_n)
-            remainder = max(0.0, float(1.0 - top.sum()))
-            weights_table = [{"name": name, "weight": float(weight)} for name, weight in top.items()]
-            if len(ranked) > top_n and remainder > 0:
-                weights_table.append({"name": "Other", "weight": remainder})
+            min_weight = float(weights.min().min())
+            if min_weight < -1e-8:
+                flash("Some weights are negative beyond tolerance.", "warning")
+
+            row_sum = weights.sum(axis=1)
+            if ((row_sum - 1.0).abs() > 1e-5).any():
+                flash("Weights do not sum to 100% on every rebalance date.", "warning")
+
+            top = _top_weights(weights.iloc[-1], top_n=10)
+            if top.empty:
+                flash("No usable weights found for the latest rebalance date.", "warning")
+            else:
+                weights_payload = {
+                    "labels": [str(x) for x in top.index],
+                    "values": (top.values * 100).round(2).tolist(),
+                }
+                weights_table = [
+                    {
+                        "name": str(name),
+                        "weight": float(weight),
+                        "weight_pct": float(weight * 100.0),
+                    }
+                    for name, weight in top.items()
+                ]
 
         portfolio = run.portfolio_return.rename("Simulated Portfolio")
         benchmark = run.benchmark_return.rename("Market Benchmark")

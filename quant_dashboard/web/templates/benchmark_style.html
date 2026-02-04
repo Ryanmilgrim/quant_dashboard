@@ -182,7 +182,7 @@
                 {% for row in weights_table %}
                   <tr>
                     <th scope="row">{{ row.name }}</th>
-                    <td>{{ '%.2f' | format(row.weight * 100) }}%</td>
+                    <td>{{ '%.2f' | format(row.weight_pct) }}%</td>
                   </tr>
                 {% endfor %}
               </tbody>

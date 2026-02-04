@@ -326,16 +326,18 @@ def _rolling_tracking_dpp(
         for solver in solver_candidates:
             try:
                 prob.solve(solver=solver, warm_start=True, verbose=False)
-                solved = True
-                break
             except cp.error.SolverError:
                 continue
+            if prob.status in (cp.OPTIMAL, cp.OPTIMAL_INACCURATE):
+                solved = True
+                break
 
         if not solved:
             try:
                 prob.solve(warm_start=True, verbose=False)
-                solved = True
             except cp.error.SolverError:
+                continue
+            if prob.status not in (cp.OPTIMAL, cp.OPTIMAL_INACCURATE):
                 continue
 
         if u.value is None or alpha.value is None:
