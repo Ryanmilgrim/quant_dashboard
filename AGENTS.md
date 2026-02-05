@@ -89,6 +89,7 @@ If the web app is affected:
 - Use the section header pattern with `.section-header`, `.section-number`, `.section-title`, and `.section-rule`.
 - Keep layouts on the 12-column grid (`.report-grid`, `.span-*`) and use existing card patterns (`.card`, `.report-card`, `.panel-navy`, `.bubble-callout`).
 - For charts, keep restrained styling (thin gridlines, minimal clutter); benchmark line in teal (`#2c9bac`), industries in navy (`#001f38`), no x-axis title.
+- For charts, use two-digit year tick labels on the x-axis (e.g., `'95`, `'26`). For return charts, label the y-axis as "Daily return" and show percent ticks with one decimal place. Avoid downsampling by default; if performance demands it, cap at ~5040 points.
 - Preserve the persistent disclaimer text in both banner and footer, and do not reference BNY anywhere:
   - "This personal site was created by Ryan Milgrim, CFA for recreation and is not intended as client advice. For educational/demo purposes only."
 

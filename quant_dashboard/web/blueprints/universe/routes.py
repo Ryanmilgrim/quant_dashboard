@@ -19,9 +19,8 @@ def _prepare_chart_payload(
     *,
     rebase_to_100: bool = True,
     y_axis_title: str = "Benchmark index level (base = 100)",
-    max_points: Optional[int] = 900,
 ) -> dict[str, object]:
-    """Prepare a Plotly-friendly payload with optional down-sampling for speed."""
+    """Prepare a Plotly-friendly payload."""
 
     df = cumulative_growth.copy()
 
@@ -32,12 +31,6 @@ def _prepare_chart_payload(
         # Rebase so every chart starts at the same anchor and avoids runaway scales
         # when the cache includes prior history.
         df = df.div(df.iloc[0]).mul(100)
-
-    # Thin when requested and the browser payload would still be large. This keeps
-    # roughly ~max_points evenly spaced for smooth Plotly rendering.
-    if max_points is not None and len(df) > max_points:
-        take_idx = np.linspace(0, len(df) - 1, max_points, dtype=int)
-        df = df.iloc[take_idx]
 
     dates = [dt.strftime("%Y-%m-%d") for dt in df.index]
     series = [
@@ -100,8 +93,6 @@ def investment_universe():
         if frequency == "monthly":
             asset_returns = asset_returns.resample("M").sum()
 
-        max_points = None if frequency == "daily" else 900
-
         if asset_returns.empty:
             flash("No data returned for the requested range.", "warning")
         else:
@@ -114,12 +105,10 @@ def investment_universe():
                     log_growth,
                     rebase_to_100=False,
                     y_axis_title="Log price growth (relative to start)",
-                    max_points=max_points,
                 )
             else:
                 chart_data = _prepare_chart_payload(
                     price_index,
-                    max_points=max_points,
                 )
 
             if chart_data is not None:

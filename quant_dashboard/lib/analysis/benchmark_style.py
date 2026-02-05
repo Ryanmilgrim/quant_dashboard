@@ -7,9 +7,9 @@ import cvxpy as cp
 import numpy as np
 import pandas as pd
 
-OBJ_SOS = "sum of squares"
 OBJ_MAD = "mean absolute deviation"
-_AUTO_SOS_MAX_ELEMENTS = 50_000  # threshold used only when objective="auto"
+_DEFAULT_WINDOW_YEARS = 1.0
+_STEPS_PER_YEAR = {"daily": 252, "weekly": 52, "monthly": 12}
 
 
 @dataclass
@@ -55,11 +55,15 @@ class StyleRun:
         roll = self.rolling
         w = roll["weights"]
         pr = roll["portfolio_return"]
+        window_desc = str(roll.get("window"))
+        window_years = roll.get("window_years")
+        window_frequency = roll.get("window_frequency")
+        if window_years is not None and window_frequency:
+            window_desc = f"{window_desc} ({window_years:.2f} yrs, {window_frequency})"
         return (
             "StyleRun\n"
             f"  benchmark: {self.params.get('benchmark_name')}\n"
-            f"  window:    {roll.get('window')}\n"
-            f"  objective: {roll.get('objective')}\n"
+            f"  window:    {window_desc}\n"
             f"  rebalance: {roll.get('optimize_frequency')}\n"
             f"  assets:    {w.shape[1]}\n"
             f"  weights:   {w.index.min()} -> {w.index.max()}\n"
@@ -88,8 +92,6 @@ class StyleAnalysis:
         sum(u) = 0   (=> sum(w_assets)=1)
 
     Per rebalance date, on a trailing `window` of base-frequency observations:
-        minimize_{u, alpha}  sum_squares(alpha + Z_window @ u)   ("sum of squares")
-        or
         minimize_{u, alpha}  mean(abs(alpha + Z_window @ u))     ("mean absolute deviation")
 
     Z = [benchmark, assets...]
@@ -124,7 +126,7 @@ class StyleAnalysis:
         self,
         *,
         style_window: Optional[int] = None,
-        style_objective: str = "auto",  # "auto" | "sum of squares" | "mean absolute deviation"
+        style_window_years: Optional[float] = None,
         optimize_frequency: str = "daily",  # "daily" | "weekly" | "monthly"
         start: Optional[pd.Timestamp] = None,
         end: Optional[pd.Timestamp] = None,
@@ -135,14 +137,15 @@ class StyleAnalysis:
             benchmark=bench,
             assets=assets,
             window=style_window,
-            objective=style_objective,
+            window_years=style_window_years,
             optimize_frequency=optimize_frequency,
         )
 
         params = {
             "benchmark_name": self.benchmark_name,
             "style_window": style["rolling"]["window"],
-            "style_objective": style["rolling"]["objective"],
+            "style_window_years": style["rolling"]["window_years"],
+            "window_frequency": style["rolling"]["window_frequency"],
             "optimize_frequency": style["rolling"]["optimize_frequency"],
             "start": start,
             "end": end,
@@ -190,7 +193,7 @@ class StyleAnalysis:
         benchmark: pd.Series,
         assets: pd.DataFrame,
         window: Optional[int],
-        objective: str,
+        window_years: Optional[float],
         optimize_frequency: str,
     ) -> dict[str, Any]:
         df0 = pd.concat([benchmark.rename(self.benchmark_name), assets], axis=1)
@@ -200,21 +203,28 @@ class StyleAnalysis:
 
         df = df0[[self.benchmark_name] + [c for c in df0.columns if c != self.benchmark_name]]
 
+        frequency = _infer_frequency(df.index)
+        steps_per_year = _steps_per_year(frequency)
+
         if window is None:
-            window = _default_window(df.index)
-        window = int(window)
+            years = float(_DEFAULT_WINDOW_YEARS if window_years is None else window_years)
+            if years <= 0:
+                raise ValueError("style_window_years must be positive.")
+            window = int(round(years * steps_per_year))
+        else:
+            window = int(window)
+            years = window / float(steps_per_year)
+
         if window <= 1:
             raise ValueError("style_window must be greater than 1.")
         if len(df) < window:
             raise ValueError(f"Not enough rows ({len(df)}) for window={window}")
 
-        chosen_obj = _choose_objective(objective, window, df.shape[1])
         rebalance = _normalize_rebalance(optimize_frequency)
 
         out = _rolling_tracking_dpp(
             df=df,
             window=window,
-            objective=chosen_obj,
             optimize_frequency=rebalance,
         )
 
@@ -228,7 +238,8 @@ class StyleAnalysis:
             "meta": meta,
             "rolling": {
                 "window": window,
-                "objective": chosen_obj,
+                "window_years": years,
+                "window_frequency": frequency,
                 "optimize_frequency": rebalance,
                 "weights": out["weights"],
                 "tracking_weights": out["tracking_weights"],
@@ -244,7 +255,6 @@ def _rolling_tracking_dpp(
     *,
     df: pd.DataFrame,
     window: int,
-    objective: str,
     optimize_frequency: str,
 ) -> dict[str, Any]:
     """
@@ -257,6 +267,7 @@ def _rolling_tracking_dpp(
     """
     df = df.sort_index()
     Z = df.to_numpy(dtype=float)  # benchmark + assets (assets may include NaN)
+    Z_filled = np.nan_to_num(Z, nan=0.0)
     dates = pd.DatetimeIndex(df.index)
     cols = list(df.columns)
     bmk_col = cols[0]
@@ -274,6 +285,11 @@ def _rolling_tracking_dpp(
     reb_pos = dates.get_indexer(reb_dates)
     reb_pos = reb_pos[reb_pos >= (window - 1)]
 
+    X = Z[:, 1:]
+    X_filled = Z_filled[:, 1:]
+    nan_mask = np.isnan(X)
+    nan_cumsum = np.cumsum(nan_mask, axis=0) if nan_mask.any() else None
+
     # Compile once (DPP)
     Zp = cp.Parameter((window, n_plus_1))
     wmax = cp.Parameter(n_assets, nonneg=True)
@@ -282,12 +298,7 @@ def _rolling_tracking_dpp(
     alpha = cp.Variable()
     r = alpha + Zp @ u
 
-    if objective == OBJ_SOS:
-        obj = cp.Minimize(cp.sum_squares(r))
-    elif objective == OBJ_MAD:
-        obj = cp.Minimize(cp.sum(cp.abs(r)) / window)
-    else:
-        raise ValueError(f"objective must be '{OBJ_SOS}' or '{OBJ_MAD}'")
+    obj = cp.Minimize(cp.sum(cp.abs(r)) / window)
 
     cons = [
         u[0] == -1,
@@ -303,7 +314,7 @@ def _rolling_tracking_dpp(
     alpha.value = 0.0
 
     installed = set(cp.installed_solvers())
-    solver_candidates = _solver_candidates(objective, installed)
+    solver_candidates = _solver_candidates(installed)
 
     solved_pos: list[int] = []
     solved_w: list[np.ndarray] = []
@@ -312,15 +323,19 @@ def _rolling_tracking_dpp(
     for t_end in reb_pos:
         s = t_end - window + 1
         e = t_end + 1
-        Z_win = Z[s:e, :]
-        X_win = Z_win[:, 1:]
-
-        avail = ~np.isnan(X_win).any(axis=0)
+        if nan_cumsum is None:
+            avail = np.ones(n_assets, dtype=bool)
+        else:
+            if s == 0:
+                window_nans = nan_cumsum[t_end]
+            else:
+                window_nans = nan_cumsum[t_end] - nan_cumsum[s - 1]
+            avail = window_nans == 0
         if avail.sum() == 0:
             continue
 
         wmax.value = avail.astype(float)
-        Zp.value = np.nan_to_num(Z_win, nan=0.0)
+        Zp.value = Z_filled[s:e, :]
 
         solved = False
         for solver in solver_candidates:
@@ -353,10 +368,9 @@ def _rolling_tracking_dpp(
             w = w / sw
 
         # recompute alpha consistently for the cleaned weights (diagnostic only)
-        y_win = Z_win[:, 0]
-        X_win_f = np.nan_to_num(X_win, nan=0.0)
-        te = -y_win + X_win_f @ w
-        a = float(-te.mean()) if objective == OBJ_SOS else float(-np.median(te))
+        y_win = Z_filled[s:e, 0]
+        te = -y_win + X_filled[s:e, :] @ w
+        a = float(-np.median(te))
 
         solved_pos.append(int(t_end))
         solved_w.append(w)
@@ -389,15 +403,13 @@ def _rolling_tracking_dpp(
     A = pd.Series(solved_a, index=solved_dates, name="alpha")
 
     # base-frequency investable return with piecewise-constant weights
-    y = Z[:, 0]
-    X = Z[:, 1:]
+    y = Z_filled[:, 0]
 
     portfolio_ret = np.full(T, np.nan, dtype=float)
     for i, pos in enumerate(solved_pos):
         seg_start = pos
         seg_end = solved_pos[i + 1] if (i + 1) < len(solved_pos) else T
-        X_seg = np.nan_to_num(X[seg_start:seg_end, :], nan=0.0)
-        portfolio_ret[seg_start:seg_end] = X_seg @ solved_w[i]
+        portfolio_ret[seg_start:seg_end] = X_filled[seg_start:seg_end, :] @ solved_w[i]
 
     bench_s = pd.Series(y, index=dates, name="benchmark_return")
     port_s = pd.Series(portfolio_ret, index=dates, name="portfolio_return")
@@ -413,23 +425,36 @@ def _rolling_tracking_dpp(
     }
 
 
-def _choose_objective(objective: str, window: int, n_plus_1: int) -> str:
-    obj = (objective or "auto").strip().lower()
-    if obj in ("sum of squares", "sos", "least squares", "ls"):
-        return OBJ_SOS
-    if obj in ("mean absolute deviation", "mad", "mae"):
-        return OBJ_MAD
-    if obj == "auto":
-        return OBJ_MAD if (window * n_plus_1) > _AUTO_SOS_MAX_ELEMENTS else OBJ_SOS
-    raise ValueError(f"style_objective must be 'auto', '{OBJ_SOS}', or '{OBJ_MAD}'")
-
-
-def _solver_candidates(objective: str, installed: set[str]) -> list[str]:
-    if objective == OBJ_MAD:
-        preferred = ("ECOS", "SCS")
-    else:
-        preferred = ("OSQP", "ECOS", "SCS")
+def _solver_candidates(installed: set[str]) -> list[str]:
+    preferred = ("ECOS", "SCS")
     return [solver for solver in preferred if solver in installed]
+
+
+def _infer_frequency(idx: pd.Index) -> str:
+    if len(idx) < 3:
+        return "daily"
+
+    inferred = pd.infer_freq(pd.DatetimeIndex(idx))
+    if inferred:
+        if inferred.startswith(("B", "D")):
+            return "daily"
+        if inferred.startswith("W"):
+            return "weekly"
+        if inferred.startswith(("M", "MS")):
+            return "monthly"
+
+    dt = pd.to_datetime(idx)
+    deltas = np.diff(dt.values.astype("datetime64[D]").astype(np.int64))
+    med = float(np.median(deltas)) if len(deltas) else 1.0
+    if med <= 3:
+        return "daily"
+    if med <= 10:
+        return "weekly"
+    return "monthly"
+
+
+def _steps_per_year(frequency: str) -> int:
+    return _STEPS_PER_YEAR.get(frequency, 252)
 
 
 def _normalize_rebalance(freq: str) -> str:
@@ -459,18 +484,8 @@ def _rebalance_dates(idx: pd.DatetimeIndex, freq: str) -> pd.DatetimeIndex:
     return pd.DatetimeIndex(d)
 
 
-def _default_window(idx: pd.Index) -> int:
-    if len(idx) < 3:
-        return 252
-    dt = pd.to_datetime(idx)
-    deltas = np.diff(dt.values.astype("datetime64[D]").astype(np.int64))
-    med = float(np.median(deltas)) if len(deltas) else 1.0
-    return 60 if med >= 20 else 252
-
-
 __all__ = [
     "OBJ_MAD",
-    "OBJ_SOS",
     "StyleAnalysis",
     "StyleRun",
 ]
