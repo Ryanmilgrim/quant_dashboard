@@ -267,7 +267,6 @@ def _rolling_tracking_dpp(
     """
     df = df.sort_index()
     Z = df.to_numpy(dtype=float)  # benchmark + assets (assets may include NaN)
-    Z_filled = np.nan_to_num(Z, nan=0.0)
     dates = pd.DatetimeIndex(df.index)
     cols = list(df.columns)
     bmk_col = cols[0]
@@ -285,32 +284,37 @@ def _rolling_tracking_dpp(
     reb_pos = dates.get_indexer(reb_dates)
     reb_pos = reb_pos[reb_pos >= (window - 1)]
 
+    y = Z[:, 0]
     X = Z[:, 1:]
-    X_filled = Z_filled[:, 1:]
+    y_filled = np.nan_to_num(y, nan=0.0)
+    X_filled = np.nan_to_num(X, nan=0.0)
     nan_mask = np.isnan(X)
     nan_cumsum = np.cumsum(nan_mask, axis=0) if nan_mask.any() else None
 
     # Compile once (DPP)
-    Zp = cp.Parameter((window, n_plus_1))
+    y_param = cp.Parameter(window)
+    X_param = cp.Parameter((window, n_assets))
     wmax = cp.Parameter(n_assets, nonneg=True)
 
-    u = cp.Variable(n_plus_1)
+    w = cp.Variable(n_assets)
     alpha = cp.Variable()
-    r = alpha + Zp @ u
+    r = alpha - y_param + X_param @ w
+    t = cp.Variable(window, nonneg=True)
 
-    obj = cp.Minimize(cp.sum(cp.abs(r)) / window)
+    obj = cp.Minimize(cp.sum(t) / window)
 
     cons = [
-        u[0] == -1,
-        u[1:] >= 0,
-        u[1:] <= wmax,  # 0 for unavailable assets in this window
-        cp.sum(u) == 0,
+        w >= 0,
+        w <= wmax,  # 0 for unavailable assets in this window
+        cp.sum(w) == 1,
+        t >= r,
+        t >= -r,
     ]
     prob = cp.Problem(obj, cons)
     if not prob.is_dcp(dpp=True):
         raise ValueError("Problem is not DPP (unexpected).")
 
-    u.value = np.r_[-1.0, np.full(n_assets, 1.0 / n_assets)]
+    w.value = np.full(n_assets, 1.0 / n_assets)
     alpha.value = 0.0
 
     installed = set(cp.installed_solvers())
@@ -335,7 +339,8 @@ def _rolling_tracking_dpp(
             continue
 
         wmax.value = avail.astype(float)
-        Zp.value = Z_filled[s:e, :]
+        y_param.value = y_filled[s:e]
+        X_param.value = X_filled[s:e, :]
 
         solved = False
         for solver in solver_candidates:
@@ -355,25 +360,25 @@ def _rolling_tracking_dpp(
             if prob.status not in (cp.OPTIMAL, cp.OPTIMAL_INACCURATE):
                 continue
 
-        if u.value is None or alpha.value is None:
+        if w.value is None or alpha.value is None:
             continue
 
-        uv = np.asarray(u.value).reshape(-1)
-        w = np.maximum(uv[1:], 0.0) * avail
+        wv = np.asarray(w.value).reshape(-1)
+        w_clean = np.maximum(wv, 0.0) * avail
 
-        sw = float(w.sum())
+        sw = float(w_clean.sum())
         if sw <= 0:
-            w = avail.astype(float) / float(avail.sum())
+            w_clean = avail.astype(float) / float(avail.sum())
         else:
-            w = w / sw
+            w_clean = w_clean / sw
 
         # recompute alpha consistently for the cleaned weights (diagnostic only)
-        y_win = Z_filled[s:e, 0]
-        te = -y_win + X_filled[s:e, :] @ w
+        y_win = y_filled[s:e]
+        te = -y_win + X_filled[s:e, :] @ w_clean
         a = float(-np.median(te))
 
         solved_pos.append(int(t_end))
-        solved_w.append(w)
+        solved_w.append(w_clean)
         solved_a.append(a)
 
     if len(solved_pos) == 0:
@@ -381,7 +386,7 @@ def _rolling_tracking_dpp(
         empty_w = pd.DataFrame(index=empty_idx, columns=asset_cols, dtype=float)
         empty_tw = pd.DataFrame(index=empty_idx, columns=[bmk_col] + asset_cols, dtype=float)
         base_idx = dates
-        bench_s = pd.Series(Z[:, 0], index=base_idx, name="benchmark_return")
+        bench_s = pd.Series(y, index=base_idx, name="benchmark_return")
         nan_s = pd.Series(np.full(T, np.nan), index=base_idx, name="portfolio_return")
         return {
             "weights": empty_w,
@@ -403,8 +408,6 @@ def _rolling_tracking_dpp(
     A = pd.Series(solved_a, index=solved_dates, name="alpha")
 
     # base-frequency investable return with piecewise-constant weights
-    y = Z_filled[:, 0]
-
     portfolio_ret = np.full(T, np.nan, dtype=float)
     for i, pos in enumerate(solved_pos):
         seg_start = pos
