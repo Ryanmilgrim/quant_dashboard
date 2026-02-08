@@ -1,13 +1,22 @@
 from __future__ import annotations
 
-from datetime import date
+from datetime import date, datetime
+from pathlib import Path
 from typing import Optional
 
 import numpy as np
 import pandas as pd
-from flask import Blueprint, flash, render_template, request
+from flask import Blueprint, current_app, flash, redirect, render_template, request, url_for
 
-from quant_dashboard.lib.analysis import StyleAnalysis
+from quant_dashboard.lib.analysis import (
+    StyleAnalysis,
+    StyleAnalysisSnapshot,
+    StyleRun,
+    list_style_snapshots,
+    load_style_snapshot,
+    save_style_snapshot,
+    snapshot_path,
+)
 from quant_dashboard.lib.data import SUPPORTED_INDUSTRY_UNIVERSES
 from quant_dashboard.web.services.universe_cache import (
     get_universe_returns_cached,
@@ -15,6 +24,16 @@ from quant_dashboard.web.services.universe_cache import (
 )
 
 style_bp = Blueprint("style", __name__, url_prefix="/style")
+
+_STEPS_PER_YEAR = {"daily": 252, "weekly": 52, "monthly": 12}
+
+
+def _style_results_dir() -> Path:
+    root = Path(current_app.instance_path)
+    root.mkdir(parents=True, exist_ok=True)
+    path = root / "analysis_results" / "benchmark_style"
+    path.mkdir(parents=True, exist_ok=True)
+    return path
 
 
 def _opt_int(value: Optional[str]) -> Optional[int]:
@@ -90,6 +109,174 @@ def _prepare_weights_history_payload(
     return {"series": series, "y_axis_title": "Weight (%)"}
 
 
+def _perf_row(
+    name: str,
+    returns: pd.Series,
+    *,
+    steps_per_year: int,
+    info_ratio: Optional[float] = None,
+) -> dict[str, object]:
+    r = returns.dropna().astype(float)
+    if r.empty:
+        return {
+            "name": name,
+            "total_cont_return": None,
+            "ann_cont_return": None,
+            "ann_vol": None,
+            "sharpe": None,
+            "info_ratio": info_ratio,
+        }
+
+    total_cont_return = float(r.sum() * 100.0)
+    ann_cont_return = float(r.mean() * steps_per_year * 100.0)
+
+    vol = float(r.std())
+    ann_vol = float(vol * np.sqrt(steps_per_year) * 100.0) if np.isfinite(vol) else None
+
+    if np.isfinite(vol) and vol > 0:
+        sharpe = float((r.mean() / vol) * np.sqrt(steps_per_year))
+    else:
+        sharpe = None
+
+    return {
+        "name": name,
+        "total_cont_return": total_cont_return,
+        "ann_cont_return": ann_cont_return,
+        "ann_vol": ann_vol,
+        "sharpe": sharpe,
+        "info_ratio": info_ratio,
+    }
+
+
+def _summarize_style_run(run: StyleRun) -> dict[str, object]:
+    chart_growth: Optional[dict[str, object]] = None
+    chart_tracking: Optional[dict[str, object]] = None
+    weights_history: Optional[dict[str, object]] = None
+    weights_table: list[dict[str, object]] = []
+    metrics: Optional[dict[str, object]] = None
+    warnings: list[str] = []
+
+    weights = run.weights
+    if weights.empty:
+        warnings.append("No feasible weights found for the requested configuration.")
+    else:
+        min_weight = float(weights.min().min())
+        if min_weight < -1e-8:
+            warnings.append("Some weights are negative beyond tolerance.")
+
+        row_sum = weights.sum(axis=1)
+        if ((row_sum - 1.0).abs() > 1e-5).any():
+            warnings.append("Weights do not sum to 100% on every rebalance date.")
+
+        weights_history = _prepare_weights_history_payload(weights)
+
+        top = _top_weights(weights.iloc[-1], top_n=10)
+        if top.empty:
+            warnings.append("No usable weights found for the latest rebalance date.")
+        else:
+            weights_table = [
+                {
+                    "name": str(name),
+                    "weight": float(weight),
+                    "weight_pct": float(weight * 100.0),
+                }
+                for name, weight in top.items()
+            ]
+
+    portfolio = run.portfolio_return.rename("Simulated Portfolio")
+    benchmark = run.benchmark_return.rename("Market Benchmark")
+    growth = pd.concat([portfolio, benchmark], axis=1).dropna(how="any")
+    if not growth.empty:
+        growth = np.exp(growth.cumsum()) * 100
+        chart_growth = _prepare_line_chart_payload(
+            growth,
+            y_axis_title="Indexed growth (base = 100)",
+        )
+
+    active_return = run.tracking_error.rename("Active Return").dropna()
+    if not active_return.empty:
+        active_return_pct = active_return.mul(100.0).rename("Residual return")
+        chart_tracking = _prepare_line_chart_payload(
+            active_return_pct.to_frame(),
+            y_axis_title="Daily return",
+            round_to=4,
+        )
+        control_sd = float(active_return_pct.std())
+        if np.isfinite(control_sd) and control_sd > 0:
+            chart_tracking["control_limits"] = {
+                "upper": float(3.0 * control_sd),
+                "lower": float(-3.0 * control_sd),
+            }
+
+    te = run.tracking_error.dropna()
+    window_frequency = str(run.params.get("window_frequency") or "daily")
+    steps_per_year = _STEPS_PER_YEAR.get(window_frequency, 252)
+
+    info_ratio = None
+    if not te.empty:
+        te_vol = float(te.std())
+        if np.isfinite(te_vol) and te_vol > 0:
+            info_ratio = float((float(te.mean()) / te_vol) * np.sqrt(steps_per_year))
+
+    sample = pd.concat([portfolio, benchmark], axis=1).dropna(how="any")
+    sample_start = sample.index.min() if not sample.empty else None
+    sample_end = sample.index.max() if not sample.empty else None
+    sample_years = (
+        float((sample_end - sample_start).days / 365.25)
+        if sample_start is not None and sample_end is not None
+        else None
+    )
+
+    metrics = {
+        "inputs": {
+            "window": run.params.get("style_window"),
+            "window_years": run.params.get("style_window_years"),
+            "window_frequency": window_frequency,
+            "rebalance": run.params.get("optimize_frequency"),
+            "method": run.params.get("method"),
+            "assets": weights.shape[1] if not weights.empty else 0,
+            "rebalance_start": (
+                weights.index.min().strftime("%Y-%m-%d") if not weights.empty else None
+            ),
+            "rebalance_end": (
+                weights.index.max().strftime("%Y-%m-%d") if not weights.empty else None
+            ),
+        },
+        "sample": {
+            "start": sample_start.strftime("%Y-%m-%d") if sample_start is not None else None,
+            "end": sample_end.strftime("%Y-%m-%d") if sample_end is not None else None,
+            "years": sample_years,
+        },
+        "performance": [
+            _perf_row(
+                "Simulated Portfolio",
+                portfolio,
+                steps_per_year=steps_per_year,
+            ),
+            _perf_row(
+                "Market Benchmark",
+                benchmark,
+                steps_per_year=steps_per_year,
+            ),
+            _perf_row(
+                "Active Return",
+                te,
+                steps_per_year=steps_per_year,
+                info_ratio=info_ratio,
+            ),
+        ],
+    }
+
+    return {
+        "chart_growth": chart_growth,
+        "chart_tracking": chart_tracking,
+        "weights_history": weights_history,
+        "weights_table": weights_table,
+        "metrics": metrics,
+        "warnings": warnings,
+    }
+
+
 @style_bp.route("/benchmark-style", methods=["GET", "POST"])
 def benchmark_style():
     chart_growth: Optional[dict[str, object]] = None
@@ -102,10 +289,14 @@ def benchmark_style():
     selected_universe = (params.get("universe") or "10").strip()
     style_window_value = (params.get("style_window") or "").strip()
     style_window_years_value = (params.get("style_window_years") or "").strip()
-    rebalance = (params.get("rebalance") or "monthly").strip()
+    rebalance = (params.get("rebalance") or "annual").strip()
+    method = (params.get("method") or "projection").strip()
     start_year_value = (params.get("start_year") or "").strip()
+    save_name_value = (params.get("save_name") or "").strip()
+    save_overwrite = bool(params.get("save_overwrite"))
 
     weighting = "value"
+    factor_set = "ff3"
     current_year = date.today().year
     earliest_start_year: Optional[int] = None
     start_year_display: Optional[str] = start_year_value
@@ -115,12 +306,15 @@ def benchmark_style():
         if universe not in SUPPORTED_INDUSTRY_UNIVERSES:
             raise ValueError("Unsupported universe")
 
-        if rebalance not in {"daily", "weekly", "monthly"}:
+        if method not in {"projection", "qp"}:
+            raise ValueError("Unsupported solve method")
+
+        if rebalance not in {"daily", "weekly", "monthly", "annual"}:
             raise ValueError("Unsupported rebalance frequency")
 
-        earliest_start = get_universe_start_date_cached(universe, weighting)
+        earliest_start = get_universe_start_date_cached(universe, weighting, factor_set=factor_set)
         earliest_start_year = earliest_start.year
-        default_start_year = max(earliest_start_year, 1970)
+        default_start_year = earliest_start_year
 
         if not start_year_display:
             start_year_display = str(default_start_year)
@@ -141,6 +335,7 @@ def benchmark_style():
         df = get_universe_returns_cached(
             universe,
             weighting=weighting,
+            factor_set=factor_set,
             start_date=start_date,
         )
 
@@ -157,7 +352,10 @@ def benchmark_style():
                 selected_universe=selected_universe,
                 style_window_years_value=style_window_years_value,
                 rebalance=rebalance,
+                method=method,
                 start_year_value=start_year_display,
+                save_name_value=save_name_value,
+                save_overwrite=save_overwrite,
                 earliest_start_year=earliest_start_year or current_year,
                 current_year=current_year,
             )
@@ -174,79 +372,44 @@ def benchmark_style():
             style_window=style_window,
             style_window_years=style_window_years,
             optimize_frequency=rebalance,
+            method=method,
         )
 
-        weights = run.weights
-        if weights.empty:
-            flash("No feasible weights found for the requested configuration.", "warning")
-        else:
-            min_weight = float(weights.min().min())
-            if min_weight < -1e-8:
-                flash("Some weights are negative beyond tolerance.", "warning")
+        summary = _summarize_style_run(run)
+        chart_growth = summary["chart_growth"]
+        chart_tracking = summary["chart_tracking"]
+        weights_history = summary["weights_history"]
+        weights_table = summary["weights_table"]
+        metrics = summary["metrics"]
+        for warning in summary["warnings"]:
+            flash(warning, "warning")
 
-            row_sum = weights.sum(axis=1)
-            if ((row_sum - 1.0).abs() > 1e-5).any():
-                flash("Weights do not sum to 100% on every rebalance date.", "warning")
-
-            weights_history = _prepare_weights_history_payload(weights)
-
-            top = _top_weights(weights.iloc[-1], top_n=10)
-            if top.empty:
-                flash("No usable weights found for the latest rebalance date.", "warning")
-            else:
-                weights_table = [
-                    {
-                        "name": str(name),
-                        "weight": float(weight),
-                        "weight_pct": float(weight * 100.0),
-                    }
-                    for name, weight in top.items()
-                ]
-
-        portfolio = run.portfolio_return.rename("Simulated Portfolio")
-        benchmark = run.benchmark_return.rename("Market Benchmark")
-        growth = pd.concat([portfolio, benchmark], axis=1).dropna(how="any")
-        if not growth.empty:
-            growth = np.exp(growth.cumsum()) * 100
-            chart_growth = _prepare_line_chart_payload(
-                growth,
-                y_axis_title="Indexed growth (base = 100)",
-            )
-
-        active_return = run.tracking_error.rename("Active Return").dropna()
-        if not active_return.empty:
-            active_return_pct = active_return.mul(100.0).rename("Daily Active Return (%)")
-            chart_tracking = _prepare_line_chart_payload(
-                active_return_pct.to_frame(),
-                y_axis_title="Daily return",
-                round_to=4,
-            )
-
-        te = run.tracking_error.dropna()
-        te_mean = float(te.mean()) if not te.empty else None
-        te_vol = float(te.std()) if not te.empty else None
-        steps_per_year = {"daily": 252, "weekly": 52, "monthly": 12}.get(
-            run.params["window_frequency"],
-            252,
-        )
-        te_ann = float(te_vol * np.sqrt(steps_per_year)) if te_vol is not None else None
-
-        metrics = {
-            "window": run.params["style_window"],
-            "window_years": run.params["style_window_years"],
-            "window_frequency": run.params["window_frequency"],
-            "rebalance": run.params["optimize_frequency"],
-            "assets": weights.shape[1] if not weights.empty else 0,
-            "rebalance_start": (
-                weights.index.min().strftime("%Y-%m-%d") if not weights.empty else None
-            ),
-            "rebalance_end": (
-                weights.index.max().strftime("%Y-%m-%d") if not weights.empty else None
-            ),
-            "active_return_mean": te_mean * 100.0 if te_mean is not None else None,
-            "active_return_vol": te_vol * 100.0 if te_vol is not None else None,
-            "active_return_vol_annual": te_ann * 100.0 if te_ann is not None else None,
-        }
+        if save_name_value:
+            try:
+                snapshot = StyleAnalysisSnapshot(
+                    name=save_name_value,
+                    created_at=datetime.now(),
+                    universe=universe,
+                    weighting=weighting,
+                    factor_set=factor_set,
+                    start_date=start_date,
+                    end_date=None,
+                    run=run,
+                    universe_data=df,
+                )
+                save_style_snapshot(snapshot, _style_results_dir(), overwrite=save_overwrite)
+                flash(f"Saved style run '{snapshot.name}'.", "success")
+                save_name_value = ""
+                save_overwrite = False
+            except FileExistsError:
+                flash(
+                    "A saved run with that name already exists. Enable overwrite to replace it.",
+                    "warning",
+                )
+            except ValueError:
+                flash("Please provide a valid name to save the run.", "warning")
+            except Exception:
+                flash("Unable to save the benchmark style run right now.", "danger")
     except ValueError:
         if request.method == "POST":
             flash("Please provide valid inputs.", "danger")
@@ -265,7 +428,121 @@ def benchmark_style():
         selected_universe=selected_universe,
         style_window_years_value=style_window_years_value,
         rebalance=rebalance,
+        method=method,
         start_year_value=start_year_display,
+        save_name_value=save_name_value,
+        save_overwrite=save_overwrite,
         earliest_start_year=earliest_start_year or current_year,
         current_year=current_year,
     )
+
+
+@style_bp.route("/benchmark-style/saved", methods=["GET"])
+def saved_benchmark_style():
+    chart_growth: Optional[dict[str, object]] = None
+    chart_tracking: Optional[dict[str, object]] = None
+    weights_history: Optional[dict[str, object]] = None
+    weights_table: list[dict[str, object]] = []
+    metrics: Optional[dict[str, object]] = None
+    snapshot_meta: Optional[dict[str, object]] = None
+
+    selected_key = (request.args.get("run") or "").strip()
+    saved_runs = []
+
+    try:
+        results_dir = _style_results_dir()
+        saved_runs = list_style_snapshots(results_dir)
+
+        if selected_key:
+            snapshot = load_style_snapshot(snapshot_path(results_dir, selected_key))
+            summary = _summarize_style_run(snapshot.run)
+            chart_growth = summary["chart_growth"]
+            chart_tracking = summary["chart_tracking"]
+            weights_history = summary["weights_history"]
+            weights_table = summary["weights_table"]
+            metrics = summary["metrics"]
+            for warning in summary["warnings"]:
+                flash(warning, "warning")
+
+            snapshot_meta = {
+                "name": snapshot.name,
+                "created_at": snapshot.created_at.strftime("%Y-%m-%d %H:%M"),
+                "universe": snapshot.universe,
+                "weighting": snapshot.weighting,
+                "factor_set": snapshot.factor_set,
+                "start_date": (
+                    snapshot.start_date.strftime("%Y-%m-%d") if snapshot.start_date else None
+                ),
+                "end_date": snapshot.end_date.strftime("%Y-%m-%d") if snapshot.end_date else None,
+            }
+    except FileNotFoundError:
+        flash("Saved style run not found.", "warning")
+    except Exception:
+        flash("Unable to load saved style runs right now.", "danger")
+
+    return render_template(
+        "benchmark_style_saved.html",
+        saved_runs=saved_runs,
+        selected_key=selected_key,
+        snapshot_meta=snapshot_meta,
+        chart_growth=chart_growth,
+        chart_tracking=chart_tracking,
+        weights_history=weights_history,
+        weights_table=weights_table,
+        metrics=metrics,
+    )
+
+
+@style_bp.route("/benchmark-style/saved/<run_key>/view", methods=["GET"])
+def view_saved_benchmark_style(run_key: str):
+    try:
+        results_dir = _style_results_dir()
+        snapshot = load_style_snapshot(snapshot_path(results_dir, run_key))
+    except FileNotFoundError:
+        flash("Saved style run not found.", "warning")
+        return redirect(url_for("style.saved_benchmark_style"))
+    except Exception:
+        flash("Unable to load the saved run right now.", "danger")
+        return redirect(url_for("style.saved_benchmark_style"))
+
+    params: dict[str, object] = {
+        "universe": snapshot.universe,
+        "start_year": snapshot.start_date.year if snapshot.start_date else None,
+        "style_window_years": snapshot.run.params.get("style_window_years"),
+        "rebalance": snapshot.run.params.get("optimize_frequency"),
+        "method": snapshot.run.params.get("method"),
+    }
+
+    window_years = snapshot.run.params.get("style_window_years")
+    if window_years is None:
+        params["style_window"] = snapshot.run.params.get("style_window")
+    else:
+        params["style_window_years"] = f"{float(window_years):.4f}".rstrip("0").rstrip(".")
+
+    params = {key: value for key, value in params.items() if value is not None}
+    return redirect(url_for("style.benchmark_style", **params))
+
+
+@style_bp.route("/benchmark-style/saved/<run_key>/delete", methods=["POST"])
+def delete_saved_benchmark_style(run_key: str):
+    if not request.form.get("confirm"):
+        flash("Please confirm deletion before removing a saved run.", "warning")
+        return redirect(url_for("style.saved_benchmark_style", run=run_key))
+
+    try:
+        results_dir = _style_results_dir()
+        path = snapshot_path(results_dir, run_key)
+        if not path.exists():
+            flash("Saved style run not found.", "warning")
+        else:
+            try:
+                snapshot = load_style_snapshot(path)
+                display_name = snapshot.name
+            except Exception:
+                display_name = run_key
+            path.unlink()
+            flash(f"Deleted saved run '{display_name}'.", "success")
+    except Exception:
+        flash("Unable to delete the saved run right now.", "danger")
+
+    return redirect(url_for("style.saved_benchmark_style"))
